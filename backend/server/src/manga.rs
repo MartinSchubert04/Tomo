@@ -113,20 +113,42 @@ fn parse_search(raw: Option<&str>) -> SearchQuery {
     out
 }
 
-/// Las búsquedas que se le hacen a cada fuente: los otros títulos primero (romaji, inglés) y lo
-/// escrito, sin repetir, como mucho `SEARCH_VARIANTS`.
+/// Las búsquedas que se le hacen a cada fuente: lo escrito primero (siempre) y después los otros
+/// títulos (romaji, inglés), sin repetir, como mucho `SEARCH_VARIANTS`.
 fn search_terms(q: &str, alts: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
-    for t in alts.iter().map(String::as_str).chain(std::iter::once(q)) {
-        if seen.insert(normalize(t)) {
-            out.push(t.to_string());
+    for t in std::iter::once(q).chain(alts.iter().map(String::as_str)) {
+        let n = normalize(t);
+        if n.is_empty() || !seen.insert(n) {
+            continue;
         }
+        out.push(t.to_string());
         if out.len() == SEARCH_VARIANTS {
             break;
         }
     }
     out
+}
+
+/// Qué tan parecido es un título a lo buscado (más bajo = mejor): igual a algún título, empieza
+/// con uno, lo contiene, o nada. Sirve para que "Shingeki no Kyojin" quede antes que sus spin-offs.
+fn relevance(title: &str, terms: &[String]) -> u8 {
+    let t = normalize(title);
+    let mut best = 3;
+    for q in terms.iter().map(|q| normalize(q)).filter(|q| !q.is_empty()) {
+        let r = if t == q {
+            0
+        } else if t.starts_with(&q) {
+            1
+        } else if t.contains(&q) {
+            2
+        } else {
+            3
+        };
+        best = best.min(r);
+    }
+    best
 }
 
 /// Primera línea del NDJSON cuando se buscó con otros títulos: `{"alts":[...]}`.
@@ -222,6 +244,8 @@ async fn search(State(s): State<AppState>, u: AuthUser, RawQuery(raw): RawQuery)
                                 Err(e) => err = err.or(Some(e.message)),
                             }
                         }
+                        // Orden estable: los más parecidos primero, el resto como lo dio la fuente.
+                        items.sort_by_key(|w| relevance(&w.title, &terms));
                         (items, if any_ok { None } else { err })
                     }
                     Err(_) => (Vec::new(), Some("The source took too long to answer".to_string())),
@@ -334,5 +358,30 @@ mod tests {
         assert_eq!(ids, ["2", "3", "4"]);
         let ids: Vec<_> = default_sources(&all, &["1".into()]).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["1"]);
+    }
+}
+
+#[cfg(test)]
+mod search_order_tests {
+    use super::*;
+
+    #[test]
+    fn lo_escrito_va_siempre_primero() {
+        let alts: Vec<String> = ["Attack on Titan", "Atak Tytanów", "SnK", "AoT"].iter().map(|s| s.to_string()).collect();
+        let t = search_terms("Shingeki no Kyojin", &alts);
+        assert_eq!(t, vec!["Shingeki no Kyojin", "Attack on Titan", "Atak Tytanów"]);
+        // Sin repetir lo que normaliza igual.
+        let t = search_terms("attack on titan", &["Attack on Titan!".to_string(), "Shingeki no Kyojin".to_string()]);
+        assert_eq!(t, vec!["attack on titan", "Shingeki no Kyojin"]);
+    }
+
+    #[test]
+    fn el_titulo_exacto_queda_antes_que_los_spinoffs() {
+        let terms = vec!["Shingeki no Kyojin".to_string(), "Attack on Titan".to_string()];
+        assert_eq!(relevance("Shingeki no Kyojin", &terms), 0);
+        assert_eq!(relevance("Attack on Titan", &terms), 0);
+        assert_eq!(relevance("Shingeki no Kyojin: Before The Fall", &terms), 1);
+        assert_eq!(relevance("Attack on Titan Anthology", &terms), 1);
+        assert_eq!(relevance("Spoof on Titan", &terms), 3);
     }
 }

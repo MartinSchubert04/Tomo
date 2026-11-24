@@ -512,11 +512,12 @@ async fn suggestions_and_other_titles() {
     let (_, v) = t.json(Method::GET, "/api/suggest?q=a", Some(&c), None).await;
     assert!(v.as_array().unwrap().is_empty(), "muy corto");
 
-    // Búsqueda con otros títulos: cada fuente busca los dos y se juntan sin repetir.
+    // Búsqueda con otros títulos: cada fuente busca los dos y se juntan sin repetir, con el título
+    // que coincide exacto (s8, "Shingeki no Kyojin") antes que el que solo lo contiene.
     let lines = ndjson(&t, "/api/search?q=attack%20on%20titan&alt=Shingeki%20no%20Kyojin&sources=11", &c).await;
     assert_eq!(lines[0]["alts"], json!(["Shingeki no Kyojin"]));
     let ids: Vec<&str> = lines[1]["items"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["s7", "s8"]);
+    assert_eq!(ids, ["s8", "s7"]);
     // Enter sin elegir: el server le pregunta a AniList.
     let lines = ndjson(&t, "/api/search?q=attack%20on%20titan&resolve=1&sources=11", &c).await;
     assert_eq!(lines[0]["alts"], json!(["Shingeki no Kyojin", "AoT"]));
