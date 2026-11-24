@@ -13,6 +13,7 @@
   import { num, t } from "../lib/i18n.svelte";
   import { barBottom, barTop } from "../lib/motion";
   import { bookPrefs, PAGE_COLORS } from "../lib/readerPrefs.svelte";
+  import { scale } from "../lib/scale.svelte";
   import type { Book } from "../lib/types";
 
   type TocItem = { label: string; href: string; subitems?: TocItem[] };
@@ -64,7 +65,7 @@
       @font-face { font-family: "LibLiterata"; src: url("${abs(literataItalicUrl)}") format("woff2"); font-weight: 200 900; font-style: italic; }
       @font-face { font-family: "LibInter"; src: url("${abs(interUrl)}") format("woff2"); font-weight: 100 900; }
       html { color-scheme: ${bookPrefs.color === "white" || bookPrefs.color === "sepia" ? "light" : "dark"};
-             color: ${colors.fg} !important; background: ${colors.bg} !important; font-size: ${bookPrefs.size}% !important; }
+             color: ${colors.fg} !important; background: ${colors.bg} !important; font-size: ${Math.round(bookPrefs.size * scale.factor)}% !important; }
       body { color: inherit !important; background: transparent !important; ${family ? `font-family: ${family} !important;` : ""} }
       ${family ? `p, li, blockquote, dd, div, span { font-family: inherit !important; }` : ""}
       p, li, blockquote, dd { line-height: ${bookPrefs.lineHeight} !important; text-align: ${bookPrefs.justify ? "justify" : "start"};
@@ -82,15 +83,17 @@
     r.setAttribute("flow", bookPrefs.flow);
     // foliate toma el espacio de los costados como % del ancho: los px elegidos se pasan a %.
     r.setAttribute("gap", `${Math.max(2, Math.min(30, (bookPrefs.margin / Math.max(320, innerWidth)) * 100 * 2)).toFixed(2)}%`);
-    r.setAttribute("margin", "56px");
-    r.setAttribute("max-inline-size", "760px");
-    r.setAttribute("max-column-count", innerWidth >= 1200 ? "2" : "1");
+    // El lector va sin zoom (foliate mide mucho con rects): el texto y la columna se agrandan aca
+    // con el mismo factor que el resto de la interfaz, para que en 2K no quede chico.
+    r.setAttribute("margin", `${Math.round(56 * scale.factor)}px`);
+    r.setAttribute("max-inline-size", `${Math.round(760 * scale.factor)}px`);
+    r.setAttribute("max-column-count", innerWidth >= 1200 * scale.factor ? "2" : "1");
     r.setStyles?.(css());
   }
 
   // Cada cambio de ajustes se aplica en vivo.
   $effect(() => {
-    void [bookPrefs.font, bookPrefs.size, bookPrefs.lineHeight, bookPrefs.margin, bookPrefs.justify, bookPrefs.flow, bookPrefs.color];
+    void [bookPrefs.font, bookPrefs.size, bookPrefs.lineHeight, bookPrefs.margin, bookPrefs.justify, bookPrefs.flow, bookPrefs.color, scale.factor];
     applyStyles();
   });
 

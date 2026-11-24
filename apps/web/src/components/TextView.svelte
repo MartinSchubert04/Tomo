@@ -7,6 +7,7 @@
   import { num, t } from "../lib/i18n.svelte";
   import { barTop } from "../lib/motion";
   import { bookPrefs, PAGE_COLORS } from "../lib/readerPrefs.svelte";
+  import { scale } from "../lib/scale.svelte";
   import type { Book } from "../lib/types";
 
   let {
@@ -60,7 +61,7 @@
   <div class="scroll" bind:this={box} onscroll={onScroll} onclick={() => (chrome = !chrome)} role="presentation">
     {#if text !== null}
       <article
-        style="font-family: {family}; font-size: {bookPrefs.size * 0.17}px; line-height: {bookPrefs.lineHeight}; padding: 80px {bookPrefs.margin}px 100px; text-align: {bookPrefs.justify ? 'justify' : 'start'}"
+        style="font-family: {family}; font-size: {bookPrefs.size * 0.17 * scale.factor}px; line-height: {bookPrefs.lineHeight}; padding: 80px {bookPrefs.margin}px 100px; max-width: {Math.round(760 * scale.factor)}px; text-align: {bookPrefs.justify ? 'justify' : 'start'}"
       >
         {text}
       </article>
