@@ -68,6 +68,9 @@ fn config_from_env() -> anyhow::Result<Config> {
         let h: f64 = v.parse().with_context(|| format!("LIBRARY_UPDATE_HOURS inválido: {v:?} (horas, 0 = nunca)"))?;
         cfg.update_every = (h > 0.0).then(|| Duration::from_secs_f64(h.max(0.25) * 3600.0));
     }
+    if let Ok(a) = std::env::var("LIBRARY_ANILIST_URL") {
+        cfg.anilist_url = a.trim().to_string();
+    }
     cfg.admin_user = var("LIBRARY_ADMIN_USER");
     cfg.admin_password = var("LIBRARY_ADMIN_PASSWORD");
     Ok(cfg)

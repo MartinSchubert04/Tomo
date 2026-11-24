@@ -3,6 +3,7 @@
   // que sube desde abajo (se cierra tocando afuera o arrastrandola hacia abajo). Portado de Ethereon.
   import { X } from "@lucide/svelte";
   import type { Snippet } from "svelte";
+  import { toCss } from "../lib/scale.svelte";
   import { t } from "../lib/i18n.svelte";
   import { fadeQuick, sheetIn, sheetOut, slideIn, slideOut } from "../lib/motion";
 
@@ -50,7 +51,7 @@
     startY = e.clientY;
   }
   function move(e: PointerEvent) {
-    if (dragging) dragY = Math.max(0, e.clientY - startY);
+    if (dragging) dragY = Math.max(0, toCss(e.clientY - startY));
   }
   function up() {
     if (!dragging) return;
@@ -98,7 +99,7 @@
     top: 10px;
     right: 10px;
     bottom: 10px;
-    width: min(460px, calc(100vw - 20px));
+    width: min(460px, calc(var(--vw) - 20px));
     z-index: 61;
     display: flex;
     flex-direction: column;
@@ -112,7 +113,7 @@
     right: 0;
     bottom: 0;
     width: 100%;
-    max-height: 86dvh;
+    max-height: calc(var(--vh) * 0.86);
     border-radius: calc(var(--radius) + 6px) calc(var(--radius) + 6px) 0 0;
     border-bottom: 0;
     padding-bottom: env(safe-area-inset-bottom);
@@ -122,7 +123,11 @@
     background: color-mix(in srgb, var(--bg) 88%, transparent);
     backdrop-filter: var(--blur);
   }
+  /* En los lectores <html> va sin zoom: la hoja se agranda sola y mide la ventana con su zoom. */
   .drawer.media {
+    zoom: var(--ui-zoom, 1);
+    --vw: calc(100vw / var(--ui-zoom, 1));
+    --vh: calc(100dvh / var(--ui-zoom, 1));
     background: rgba(18, 18, 20, 0.92);
     color: var(--on-media);
     border-color: var(--media-line);

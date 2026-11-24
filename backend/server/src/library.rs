@@ -85,12 +85,25 @@ pub fn save_card(c: &Connection, card: &WorkCard) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// Reemplaza los capítulos conocidos de un manga y anota la fecha del más nuevo.
+/// Reemplaza los capítulos conocidos de un manga y anota la fecha del más nuevo. Cada capítulo
+/// guarda cuándo se vio por primera vez (`found_at`): los de la primera lectura de la fuente
+/// quedan en 0 (ya estaban), los que aparecen después llevan la hora en que aparecieron. De ahí
+/// salen los "capítulos nuevos" (`newChapters`).
 pub fn save_chapters(c: &Connection, work: &str, chapters: &[Chapter]) -> rusqlite::Result<()> {
+    let known: HashMap<String, i64> = {
+        let mut st = c.prepare_cached("SELECT id, found_at FROM chapters WHERE work_id = ?1")?;
+        let rows = st.query_map([work], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let first = known.is_empty();
+    let now = now_ms();
     c.execute("DELETE FROM chapters WHERE work_id = ?1", [work])?;
-    let mut st = c.prepare_cached("INSERT OR REPLACE INTO chapters (work_id, id, name, number, ord, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")?;
+    let mut st = c.prepare_cached(
+        "INSERT OR REPLACE INTO chapters (work_id, id, name, number, ord, date, found_at, lang, scanlator) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
     for ch in chapters {
-        st.execute(params![work, ch.id, ch.name, ch.number, ch.ord, ch.date])?;
+        let found = known.get(&ch.id).copied().unwrap_or(if first { 0 } else { now });
+        st.execute(params![work, ch.id, ch.name, ch.number, ch.ord, ch.date, found, ch.lang, ch.scanlator])?;
     }
     let latest = chapters.iter().map(|c| c.date).filter(|d| *d > 0).max();
     c.execute(
@@ -137,6 +150,18 @@ pub async fn pinned_sources(db: &Db, uid: i64) -> ApiResult<Vec<String>> {
     .await
 }
 
+/// Si el usuario pidió ver contenido para adultos (`prefs.nsfw`).
+pub async fn wants_nsfw(db: &Db, uid: i64) -> ApiResult<bool> {
+    db.call(move |c| {
+        let raw: Option<String> = c.query_row("SELECT data FROM prefs WHERE user_id = ?1", [uid], |r| r.get(0)).optional()?;
+        Ok(raw
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+            .and_then(|v| v.get("nsfw").and_then(|n| n.as_bool()))
+            .unwrap_or(false))
+    })
+    .await
+}
+
 /// Tarjeta de una obra desde lo guardado (para biblioteca e historial).
 fn card_from_row(work: &str, title: Option<String>, cover: Option<String>, source: Option<String>, book: Option<(String, String, bool)>) -> WorkCard {
     if let (Some(id), Some((bt, fmt, has_cover))) = (work.strip_prefix('b').and_then(|n| n.parse().ok()), book) {
@@ -147,6 +172,14 @@ fn card_from_row(work: &str, title: Option<String>, cover: Option<String>, sourc
 
 // ---------- biblioteca ----------
 
+/// Un mismo número puede estar varias veces (idiomas, scans): se cuentan por número. Los sin
+/// número (−1) cuentan cada uno por separado. SQL sobre `ch` (fila de `chapters`).
+const CHAPTER_GROUP: &str = "(CASE WHEN ch.number >= 0 THEN ch.number ELSE -1 - ch.rowid END)";
+/// El número de `ch` está leído si cualquiera de sus versiones lo está (`l.user_id` = el usuario).
+const CHAPTER_READ: &str = "EXISTS (SELECT 1 FROM progress p JOIN chapters c2 ON c2.work_id = p.work_id AND c2.id = p.chapter
+    WHERE p.user_id = l.user_id AND p.work_id = ch.work_id AND p.done = 1
+      AND (c2.id = ch.id OR (ch.number >= 0 AND c2.number = ch.number)))";
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
@@ -156,6 +189,9 @@ pub struct LibraryEntry {
     added_at: i64,
     last_read_at: Option<i64>,
     unread: Option<i64>,
+    /// Capítulos sin leer que llegaron después de agregarlo o de la última lectura (lo que va en
+    /// "Capítulos nuevos en tu biblioteca"). `unread` cuenta todos los no leídos.
+    new_chapters: Option<i64>,
     latest_chapter_at: Option<i64>,
 }
 
@@ -165,9 +201,11 @@ fn library_entries(c: &Connection, uid: i64, only: Option<&str>) -> rusqlite::Re
                 w.title, w.cover, w.source,
                 b.title, b.format, b.cover_ext IS NOT NULL,
                 mm.latest_at,
-                (SELECT COUNT(*) FROM chapters ch WHERE ch.work_id = l.work_id),
-                (SELECT COUNT(*) FROM chapters ch WHERE ch.work_id = l.work_id AND NOT EXISTS (
-                    SELECT 1 FROM progress p WHERE p.user_id = l.user_id AND p.work_id = ch.work_id AND p.chapter = ch.id AND p.done = 1))
+                (SELECT COUNT(DISTINCT {{GROUP}}) FROM chapters ch WHERE ch.work_id = l.work_id),
+                (SELECT COUNT(DISTINCT {{GROUP}}) FROM chapters ch WHERE ch.work_id = l.work_id AND NOT {{READ}}),
+                (SELECT COUNT(DISTINCT {{GROUP}}) FROM chapters ch WHERE ch.work_id = l.work_id
+                    AND MAX(ch.date, ch.found_at) > MAX(l.added_at, COALESCE(lr.updated_at, 0))
+                    AND NOT {{READ}})
          FROM library l
          LEFT JOIN last_read lr ON lr.user_id = l.user_id AND lr.work_id = l.work_id
          LEFT JOIN works w ON w.id = l.work_id
@@ -176,7 +214,9 @@ fn library_entries(c: &Connection, uid: i64, only: Option<&str>) -> rusqlite::Re
          WHERE l.user_id = ?1 {}
          ORDER BY lr.updated_at IS NULL, lr.updated_at DESC, l.added_at DESC",
         if only.is_some() { "AND l.work_id = ?2" } else { "" }
-    );
+    )
+    .replace("{GROUP}", CHAPTER_GROUP)
+    .replace("{READ}", CHAPTER_READ);
     let mut st = c.prepare(&sql)?;
     let map = |r: &rusqlite::Row| -> rusqlite::Result<LibraryEntry> {
         let work: String = r.get(0)?;
@@ -187,6 +227,7 @@ fn library_entries(c: &Connection, uid: i64, only: Option<&str>) -> rusqlite::Re
         let is_manga = work.starts_with('s');
         let total: i64 = r.get(12)?;
         let unread: i64 = r.get(13)?;
+        let fresh: i64 = r.get(14)?;
         Ok(LibraryEntry {
             work: card_from_row(&work, r.get(5)?, r.get(6)?, r.get(7)?, book),
             status: r.get(1)?,
@@ -194,6 +235,7 @@ fn library_entries(c: &Connection, uid: i64, only: Option<&str>) -> rusqlite::Re
             added_at: r.get(3)?,
             last_read_at: r.get(4)?,
             unread: (is_manga && total > 0).then_some(unread),
+            new_chapters: (is_manga && total > 0).then_some(fresh),
             latest_chapter_at: if is_manga { r.get(11)? } else { None },
         })
     };
@@ -392,7 +434,11 @@ async fn history(State(s): State<AppState>, u: AuthUser, Query(q): Query<History
                 "SELECT lr.work_id, p.chapter, p.position, p.fraction, p.done, p.updated_at,
                         w.title, w.cover, w.source, b.title, b.format, b.cover_ext IS NOT NULL,
                         ch.name,
-                        (SELECT n.id FROM chapters n WHERE n.work_id = lr.work_id AND n.ord > ch.ord ORDER BY n.ord LIMIT 1)
+                        (SELECT n.id FROM chapters n WHERE n.work_id = lr.work_id
+                           AND (CASE WHEN ch.number >= 0 THEN n.number > ch.number ELSE n.ord > ch.ord END)
+                           ORDER BY (CASE WHEN ch.number >= 0 THEN n.number ELSE n.ord END),
+                                    (n.lang IS ch.lang) DESC, (n.scanlator IS ch.scanlator) DESC, n.date DESC
+                           LIMIT 1)
                  FROM last_read lr
                  JOIN progress p ON p.user_id = lr.user_id AND p.work_id = lr.work_id AND p.chapter = lr.chapter
                  LEFT JOIN works w ON w.id = lr.work_id
@@ -429,4 +475,35 @@ async fn hide_history(State(s): State<AppState>, u: AuthUser, Path(work): Path<S
     let uid = u.user.id;
     s.db.call(move |c| Ok(c.execute("UPDATE last_read SET hidden = 1 WHERE user_id = ?1 AND work_id = ?2", params![uid, work])?)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ch(id: &str, number: f64, date: i64, lang: Option<&str>) -> Chapter {
+        Chapter { id: id.into(), name: id.into(), number, scanlator: None, lang: lang.map(Into::into), date, ord: (number * 10.0) as i64 + id.len() as i64 }
+    }
+
+    #[tokio::test]
+    async fn new_chapters_are_only_arrivals() {
+        let db = Db::open_in_memory().unwrap();
+        let r = db
+            .call(|c| {
+                let u = crate::auth::create_user(c, "ana", "secreto1", false)?;
+                c.execute("INSERT INTO library (user_id, work_id, status, favorite, added_at) VALUES (?1, 's1', 'reading', 0, ?2)", params![u.id, now_ms() - 50])?;
+                // Primera lectura de la fuente: ya estaban, no son nuevos.
+                save_chapters(c, "s1", &[ch("1", 1.0, 1000, None), ch("2", 2.0, 2000, None)])?;
+                let a = library_entries(c, u.id, None)?;
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                // Aparece el 3, en dos idiomas, sin fecha: un capítulo nuevo.
+                save_chapters(c, "s1", &[ch("1", 1.0, 1000, None), ch("2", 2.0, 2000, None), ch("3", 3.0, 0, Some("es-419")), ch("3b", 3.0, 0, Some("en"))])?;
+                let b = library_entries(c, u.id, None)?;
+                Ok((a.into_iter().next().unwrap(), b.into_iter().next().unwrap()))
+            })
+            .await
+            .unwrap();
+        assert_eq!((r.0.unread, r.0.new_chapters), (Some(2), Some(0)));
+        assert_eq!((r.1.unread, r.1.new_chapters), (Some(3), Some(1)));
+    }
 }

@@ -17,6 +17,7 @@ import type {
   Progress,
   SearchGroup,
   Source,
+  Suggestion,
   User,
   WorkProgress,
 } from "./types";
@@ -115,6 +116,9 @@ export const api = {
   browse: (source: string, type: BrowseType, page: number, q = "", signal?: AbortSignal) =>
     req<BrowsePage>("GET", `/sources/${enc(source)}/browse` + qs({ type, q, page }), undefined, { signal }),
 
+  /** Sugerencias mientras se escribe (lo conocido y titulos de AniList en otros idiomas). */
+  suggest: (q: string, signal?: AbortSignal) => req<Suggestion[]>("GET", "/suggest" + qs({ q }), undefined, { signal }),
+
   // manga
   manga: (id: string, refresh = false) => req<MangaDetail>("GET", `/manga/${enc(id)}` + (refresh ? "?refresh=1" : "")),
   pages: (id: string, chapter: string) => req<{ pages: string[] }>("GET", `/manga/${enc(id)}/chapters/${enc(chapter)}/pages`),
@@ -169,12 +173,27 @@ export function uploadBooks(files: File[], onProgress: (frac: number) => void): 
   return { done, abort: () => xhr.abort() };
 }
 
-/** Busqueda global: el server manda una linea JSON por fuente apenas contesta (NDJSON). */
-export async function searchAll(q: string, onGroup: (g: SearchGroup) => void, signal: AbortSignal, sources?: string[]): Promise<void> {
-  const res = await req<Response>("GET", "/search" + qs({ q, sources: sources?.join(",") }), undefined, { signal, raw: true });
+/** Busqueda global: el server manda una linea JSON por fuente apenas contesta (NDJSON).
+ *  `alts`: otros titulos de la misma obra (de una sugerencia); sin ellos, `resolve` le pide al
+ *  server que pregunte a AniList. Si se busco con otros titulos, la primera linea los trae
+ *  (`onAlts`: "Buscado tambien como ..."). */
+export async function searchAll(
+  q: string,
+  onGroup: (g: SearchGroup) => void,
+  signal: AbortSignal,
+  o: { sources?: string[]; alts?: string[]; resolve?: boolean; onAlts?: (alts: string[]) => void } = {},
+): Promise<void> {
+  const p = new URLSearchParams({ q });
+  if (o.sources?.length) p.set("sources", o.sources.join(","));
+  for (const a of o.alts ?? []) p.append("alt", a);
+  if (o.resolve && !o.alts?.length) p.set("resolve", "1");
+  const res = await req<Response>("GET", "/search?" + p.toString(), undefined, { signal, raw: true });
   const emit = (line: string) => {
     const s = line.trim();
-    if (s) onGroup(JSON.parse(s) as SearchGroup);
+    if (!s) return;
+    const v = JSON.parse(s) as SearchGroup | { alts: string[] };
+    if ("alts" in v) o.onAlts?.(v.alts);
+    else onGroup(v);
   };
   if (!res.body) {
     (await res.text()).split("\n").forEach(emit);

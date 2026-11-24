@@ -12,7 +12,7 @@
   import { api, errText } from "../lib/api";
   import { t } from "../lib/i18n.svelte";
   import type { Segment } from "../lib/pages";
-  import { back, route } from "../lib/router.svelte";
+  import { back, go, route } from "../lib/router.svelte";
   import type { Book, Progress } from "../lib/types";
 
   const id = route.params[0] ?? "";
@@ -88,6 +88,11 @@
   });
 
   const startPage = $derived(last && (book?.format === "pdf" || book?.format === "cbz") && !last.done ? Number(last.position) || 0 : 0);
+
+  /** Tocar el titulo: los datos del libro (Libros, con el editor abierto si se puede editar). */
+  function toDetails() {
+    go(`/books?edit=${encodeURIComponent(id)}`);
+  }
 </script>
 
 {#if error}
@@ -107,14 +112,15 @@
     {segments}
     start={{ seg: 0, page: startPage }}
     onback={() => back("/books")}
+    ontitle={toDetails}
     onposition={(_s, page, count) => save(String(page), count ? (page + 1) / count : 0)}
     allowDouble
     ltr={book.format === "pdf"}
   />
 {:else if book.format === "txt"}
-  <TextView {book} url={api.bookFileUrl(id)} start={last?.fraction ?? 0} onback={() => back("/books")} onprogress={(f) => save(String(f), f)} />
+  <TextView {book} url={api.bookFileUrl(id)} start={last?.fraction ?? 0} onback={() => back("/books")} ontitle={toDetails} onprogress={(f) => save(String(f), f)} />
 {:else}
-  <EbookView {book} url={api.bookFileUrl(id)} start={last?.position ?? ""} onback={() => back("/books")} onprogress={save} />
+  <EbookView {book} url={api.bookFileUrl(id)} start={last?.position ?? ""} onback={() => back("/books")} ontitle={toDetails} onprogress={save} />
 {/if}
 
 <style>

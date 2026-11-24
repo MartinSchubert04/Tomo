@@ -18,10 +18,14 @@ pub struct Config {
     pub max_upload_bytes: u64,
     /// Cada cuánto buscar capítulos nuevos de lo que está en las bibliotecas. `None` = nunca.
     pub update_every: Option<Duration>,
+    /// GraphQL de AniList para las sugerencias (títulos en otros idiomas). Vacío = sin AniList.
+    pub anilist_url: String,
     /// Primer admin si la base está vacía.
     pub admin_user: Option<String>,
     pub admin_password: Option<String>,
 }
+
+pub const DEFAULT_ANILIST_URL: &str = "https://graphql.anilist.co";
 
 pub const DEFAULT_EXTENSION_REPO: &str = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json";
 
@@ -36,6 +40,7 @@ impl Config {
             extension_repo: DEFAULT_EXTENSION_REPO.into(),
             max_upload_bytes: 1024 * 1024 * 1024,
             update_every: Some(Duration::from_secs(6 * 3600)),
+            anilist_url: DEFAULT_ANILIST_URL.into(),
             admin_user: None,
             admin_password: None,
         }

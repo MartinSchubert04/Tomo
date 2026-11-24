@@ -50,6 +50,9 @@ pub struct Chapter {
     pub name: String,
     pub number: f64,
     pub scanlator: Option<String>,
+    /// Idioma del capítulo si la fuente lo dice (MangaDex y otras multi-idioma lo ponen como
+    /// `[es-la] Grupo` en el scanlator): `es-419`, `en`... `None` = el idioma de la fuente.
+    pub lang: Option<String>,
     pub date: i64,
     /// sourceOrder (para guardar; la UI no lo usa).
     #[serde(skip)]
@@ -213,14 +216,44 @@ fn card(m: &SManga) -> WorkCard {
 }
 
 fn chapter(c: SChapter) -> Chapter {
+    let (lang, scanlator) = split_lang(c.scanlator.as_deref().unwrap_or(""));
     Chapter {
         id: c.id.to_string(),
         name: c.name,
         number: c.chapter_number,
-        scanlator: c.scanlator.filter(|s| !s.trim().is_empty()),
+        scanlator,
+        lang,
         date: c.upload_date.parse().unwrap_or(0),
         ord: c.source_order,
     }
+}
+
+/// Un código de idioma: 2 o 3 letras y, opcional, `-` y una región (`es`, `es-la`, `pt-br`, `zh-hk`).
+fn is_lang_code(code: &str) -> bool {
+    let mut parts = code.split(['-', '_']);
+    let base = parts.next().unwrap_or("");
+    let region = parts.next();
+    parts.next().is_none()
+        && (2..=3).contains(&base.len())
+        && base.bytes().all(|b| b.is_ascii_alphabetic())
+        && region.is_none_or(|r| (2..=4).contains(&r.len()) && r.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// `"[es-la] Por amor al arte"` → (`es-419`, `Por amor al arte`). Sin prefijo, sin idioma.
+/// es-la y es-419 son lo mismo (español latino): queda `es-419`.
+pub fn split_lang(raw: &str) -> (Option<String>, Option<String>) {
+    let raw = raw.trim();
+    let (lang, rest) = match raw.strip_prefix('[').and_then(|r| r.split_once(']')) {
+        Some((code, rest))
+            if is_lang_code(code) =>
+        {
+            let code = code.to_ascii_lowercase().replace('_', "-");
+            let code = if code == "es-la" || code == "es-mx" { "es-419".to_string() } else { code };
+            (Some(code), rest.trim())
+        }
+        _ => (None, raw),
+    };
+    (lang, (!rest.is_empty()).then(|| rest.to_string()))
 }
 
 /// Más nuevo primero.
@@ -618,6 +651,16 @@ fn detail(m: SMangaFull, chapters: Vec<SChapter>) -> MangaDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_langs() {
+        assert_eq!(split_lang("[es-la] Por amor al arte"), (Some("es-419".into()), Some("Por amor al arte".into())));
+        assert_eq!(split_lang("[EN] RESET SCANS"), (Some("en".into()), Some("RESET SCANS".into())));
+        assert_eq!(split_lang("[es]"), (Some("es".into()), None));
+        assert_eq!(split_lang("Scan X"), (None, Some("Scan X".into())));
+        assert_eq!(split_lang("[Oficial] Algo largo de verdad"), (None, Some("[Oficial] Algo largo de verdad".into())));
+        assert_eq!(split_lang(""), (None, None));
+    }
 
     #[test]
     fn maps_paths_and_ids() {

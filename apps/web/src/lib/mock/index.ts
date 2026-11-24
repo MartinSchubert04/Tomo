@@ -123,16 +123,23 @@ function chaptersOf(i: number): Chapter[] {
   const n = i === 0 ? 1184 : 20 + ((i * 37) % 140);
   const scans = ["Lector Scans", "Nocturno FS", "Traducciones Luna"];
   const now = Date.now();
-  return Array.from({ length: n }, (_, k) => {
+  // El 2 (indice 1) es "multi-idioma" como MangaDex ALL: cada numero en latino y en ingles.
+  const multi = i === 1;
+  const out: Chapter[] = [];
+  for (let k = 0; k < n; k++) {
     const num = n - k;
-    return {
+    const base = {
       id: `${i + 1}${String(num).padStart(5, "0")}`,
       name: k % 9 === 2 ? `Capítulo ${num}: El regreso` : `Capítulo ${num}`,
       number: num,
       scanlator: scans[(num + i) % (i % 3 === 0 ? 3 : 1)],
+      lang: multi ? "es-419" : null,
       date: now - k * 3.5 * 86400000 - (i % 5) * 3600000,
     };
-  });
+    if (multi && num % 4 !== 0) out.push({ ...base, id: base.id + "9", name: `Chapter ${num}`, scanlator: "RESET SCANS", lang: "en", date: base.date - 86400000 * 40 });
+    if (!multi || num % 3 !== 0) out.push(base);
+  }
+  return out;
 }
 
 function detail(id: string): MangaDetail | null {
@@ -190,7 +197,7 @@ for (const [i, status, unread] of [
   [13, "onhold", 0],
 ] as [number, LibraryStatus, number][]) {
   const w = works[i];
-  db.library.set(w.id, { work: w, status, favorite: i === 2, addedAt: now - i * 86400000, lastReadAt: now - i * 3600000, unread, latestChapterAt: now - i * 7200000 });
+  db.library.set(w.id, { work: w, status, favorite: i === 2, addedAt: now - i * 86400000, lastReadAt: now - i * 3600000, unread, newChapters: i === 9 ? 0 : Math.min(unread, 2), latestChapterAt: now - i * 7200000 });
 }
 function seedProgress(id: string, chapter: string, page: number, pages: number, ago: number) {
   const p: Progress = { chapter, position: String(page), fraction: (page + 1) / pages, done: false, updatedAt: now - ago };
@@ -315,13 +322,32 @@ async function handle(method: string, path: string, url: URL, body: unknown): Pr
   if (seg[0] === "sources" && seg[2] === "browse") {
     return json(browse(seg[1], url.searchParams.get("type") ?? "popular", Number(url.searchParams.get("page") ?? 1), url.searchParams.get("q") ?? ""));
   }
+  if (path === "/suggest") {
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    await wait(250);
+    if (q.length < 2) return json([]);
+    const local = works
+      .filter((w) => w.title.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map((w) => ({ kind: "work", workId: w.id, title: w.title, altTitles: [], cover: w.cover, format: null, year: null, source: w.source }));
+    // Como AniList: un titulo en otro idioma que coincide.
+    const remote = [
+      { kind: "title", title: "Shingeki no Kyojin", altTitles: ["Attack on Titan", "AoT"], cover: cover("Shingeki no Kyojin", 3), format: "manga", year: 2009 },
+      { kind: "title", title: "Na Honjaman Level Up", altTitles: ["Solo Leveling"], cover: cover("Solo Leveling", 5), format: "manhwa", year: 2018 },
+    ].filter((r) => [r.title, ...r.altTitles].some((x) => x.toLowerCase().includes(q)));
+    return json([...local, ...remote]);
+  }
   if (path === "/search") {
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
     const only = url.searchParams.get("sources")?.split(",");
+    const alts = url.searchParams.getAll("alt");
+    const resolved = !alts.length && url.searchParams.get("resolve") && q.includes("attack") ? ["Shingeki no Kyojin"] : [];
     const list = SOURCES.filter((s) => !only || only.includes(s.id));
     const enc = new TextEncoder();
     const stream = new ReadableStream({
       async start(c) {
+        const shown = alts.length ? alts : resolved;
+        if (shown.length) c.enqueue(enc.encode(JSON.stringify({ alts: shown }) + "\n"));
         for (const [k, s] of list.entries()) {
           await wait(300 + k * 350);
           const items = k === 3 ? [] : works.filter((w, i) => w.title.toLowerCase().includes(q) || (i + k) % 7 === 0).slice(0, 12);
@@ -351,7 +377,7 @@ async function handle(method: string, path: string, url: URL, body: unknown): Pr
     const id = decodeURIComponent(seg[1]);
     if (method === "DELETE") return db.library.delete(id), empty();
     const w = works.find((x) => x.id === id) ?? books.find((b) => b.id === id)!;
-    const cur = db.library.get(id) ?? { work: w, status: "reading" as LibraryStatus, favorite: false, addedAt: Date.now(), lastReadAt: null, unread: w.kind === "manga" ? 0 : null, latestChapterAt: null };
+    const cur = db.library.get(id) ?? { work: w, status: "reading" as LibraryStatus, favorite: false, addedAt: Date.now(), lastReadAt: null, unread: w.kind === "manga" ? 0 : null, newChapters: w.kind === "manga" ? 0 : null, latestChapterAt: null };
     const n = { ...cur, ...(body as object) };
     db.library.set(id, n);
     return json(n);

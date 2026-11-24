@@ -21,9 +21,13 @@
   } = $props();
 
   let sentinel = $state<HTMLDivElement>();
+  // El observador se vuelve a crear cada vez que termina una carga: al observar avisa enseguida si
+  // el centinela ya esta a la vista, asi en una pantalla alta se siguen pidiendo paginas hasta
+  // llenarla (antes se quedaba en la segunda: el centinela nunca "entraba" de nuevo).
   $effect(() => {
-    if (!sentinel || !more || !hasMore) return;
-    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && !loading && more?.(), { rootMargin: "800px 0px" });
+    void items?.length;
+    if (!sentinel || !more || !hasMore || loading) return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more?.(), { rootMargin: "800px 0px" });
     io.observe(sentinel);
     return () => io.disconnect();
   });

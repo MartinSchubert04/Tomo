@@ -20,12 +20,15 @@
   import { fade } from "svelte/transition";
   import Confirm from "./components/Confirm.svelte";
   import Logo from "./components/Logo.svelte";
+  import SearchBar, { focusSearch } from "./components/SearchBar.svelte";
   import { confirmState } from "./lib/confirm.svelte";
   import { t } from "./lib/i18n.svelte";
   import { flipMs, ms, rise, toastIn } from "./lib/motion";
   import { net } from "./lib/net.svelte";
   import { FULLSCREEN, go, loadView, route, viewComponent, type ViewName } from "./lib/router.svelte";
   import { logout, restore, session } from "./lib/session.svelte";
+  import { applyScale, installScale } from "./lib/scale.svelte";
+  import { GO_KEYS } from "./lib/shortcuts";
   import { read, write } from "./lib/store";
   import { toasts } from "./lib/toast.svelte";
   import Login from "./views/Login.svelte";
@@ -42,7 +45,13 @@
 
   let collapsed = $state(read("library.sidebar") === "1");
   let moreOpen = $state(false);
+  // Celular: la busqueda a pantalla completa.
+  let phoneSearch = $state(false);
+  const isPhone = () => matchMedia("(max-width: 759px)").matches;
   const full = $derived(FULLSCREEN.includes(route.view));
+  // Tamaño de la interfaz: zoom en <html>, salvo en los lectores (ver lib/scale.svelte.ts).
+  installScale();
+  $effect.pre(() => applyScale(full));
   const View = $derived(viewComponent(route.view));
 
   // Cada vista recuerda donde estaba el scroll (al volver con "atras" queda igual).
@@ -69,14 +78,26 @@
     go(path);
   }
 
-  // "/" o Ctrl K: a la busqueda.
+  // "/" o Ctrl K: a la barra de busqueda (en el celular, la de pantalla completa). "G" y una
+  // letra: a una seccion (lib/shortcuts.ts).
+  let gAt = 0;
   function onKey(e: KeyboardEvent) {
     if (!session.user || full) return;
     const typing = (e.target as HTMLElement)?.closest?.("input, textarea, [contenteditable]");
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (gAt && performance.now() - gAt < 1200 && GO_KEYS[k]) {
+        gAt = 0;
+        e.preventDefault();
+        go(GO_KEYS[k]);
+        return;
+      }
+      gAt = k === "g" ? performance.now() : 0;
+    }
     if ((e.key === "/" && !typing) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k")) {
       e.preventDefault();
-      if (route.view === "search") document.querySelector<HTMLInputElement>(".search-input")?.focus();
-      else go("/search");
+      if (isPhone()) phoneSearch = true;
+      else focusSearch();
     }
   }
 
@@ -147,12 +168,8 @@
       {#if !full}
         <header class="topbar">
           <a href="#/" class="phone-brand" onclick={(e) => nav(e, "/")}><Logo size={24} word /></a>
-          <a href="#/search" class="searchbox" onclick={(e) => nav(e, "/search")} class:on={route.view === "search"}>
-            <Search size={16} />
-            <span class="ellipsis">{t("search.placeholder")}</span>
-            <kbd>/</kbd>
-          </a>
-          <a href="#/search" class="icon-btn phone-search" onclick={(e) => nav(e, "/search")} aria-label={t("nav.search")}><Search size={20} /></a>
+          <div class="search-slot"><SearchBar /></div>
+          <button class="icon-btn phone-search" onclick={() => (phoneSearch = true)} aria-label={t("nav.search")} title={t("nav.search")}><Search size={20} /></button>
         </header>
       {/if}
       {#if net.down}
@@ -209,6 +226,11 @@
   {/each}
 </div>
 {#if confirmState.open}<Confirm />{/if}
+{#if phoneSearch}
+  <div class="phone-sheet" transition:fade={{ duration: ms(140) }}>
+    <SearchBar full autofocus onclose={() => (phoneSearch = false)} />
+  </div>
+{/if}
 
 <style>
   .splash {
@@ -230,11 +252,11 @@
   }
   .splash.inline {
     position: static;
-    height: 60vh;
+    height: calc(var(--vh) * 0.6);
   }
   .shell {
     display: flex;
-    height: 100dvh;
+    height: var(--vh);
   }
   .sidebar {
     position: relative;
@@ -373,33 +395,24 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 58px;
+    height: 70px;
     flex: none;
     padding: 0 var(--gutter);
   }
-  .searchbox {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: min(460px, 100%);
-    height: 38px;
-    padding: 0 12px;
-    border-radius: 999px;
-    background: var(--panel-2);
-    border: var(--border) solid var(--line);
-    color: var(--text-3);
-    transition:
-      border-color 0.15s,
-      box-shadow 0.15s;
-  }
-  .searchbox span {
+  /* La busqueda centrada sobre el contenido. */
+  .search-slot {
     flex: 1;
+    display: flex;
+    justify-content: center;
+    min-width: 0;
   }
-  .searchbox:hover {
-    border-color: var(--line-strong);
-  }
-  .searchbox.on {
-    display: none;
+  .phone-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 12px;
+    background: var(--float, var(--bg));
+    overflow-y: auto;
   }
   .phone-brand,
   .phone-search {
@@ -411,6 +424,9 @@
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
+    /* Las vistas acomodan su layout al ancho util (container queries "page"; con zoom, las media
+       queries miden la ventana y no sirven: ver lib/scale.svelte.ts). */
+    container: page / inline-size;
   }
   .content.full {
     overflow: hidden;
@@ -460,7 +476,7 @@
     background: var(--float, var(--sidebar));
     box-shadow: var(--pop-shadow);
     font-weight: 550;
-    max-width: min(380px, calc(100vw - 36px));
+    max-width: min(380px, calc(var(--vw) - 36px));
     pointer-events: auto;
   }
   .toast.bad {
@@ -481,7 +497,7 @@
     .phone-brand {
       display: inline-flex;
     }
-    .searchbox {
+    .search-slot {
       display: none;
     }
     .phone-search {

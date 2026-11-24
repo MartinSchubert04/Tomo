@@ -16,6 +16,11 @@ export type Prefs = {
   sources?: string[];
   /** Mostrar fuentes NSFW en Explorar. */
   nsfw?: boolean;
+  /** Idiomas de las fuentes que se muestran (Explorar, busqueda global, fijar). Sin definir:
+   *  español, español latino y multi-idioma (lib/sources.svelte.ts, DEFAULT_LANGS). */
+  sourceLangs?: string[];
+  /** Idiomas de los capitulos en orden de preferencia (lib/chapters.ts). */
+  chapterLangs?: string[];
 };
 
 export const session = $state<{ user: User | null; prefs: Prefs; ready: boolean; expired: boolean }>({

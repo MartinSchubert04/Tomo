@@ -68,7 +68,7 @@
 <style>
   .wrap {
     position: relative;
-    min-height: 100dvh;
+    min-height: var(--vh);
     display: grid;
     place-items: center;
     padding: 20px;

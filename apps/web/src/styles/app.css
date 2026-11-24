@@ -8,6 +8,13 @@
   /* Colores de la pagina en los lectores: los pone el lector segun sus ajustes. */
   --page-bg: #000;
   --page-fg: #d6d6d6;
+  /* Alto y ancho de la ventana en px CSS. Con el zoom de "Tamaño de la interfaz" (lib/scale.svelte.ts)
+     100dvh y 100vw se multiplican por el zoom: siempre usar estos. --zoom lo pone scale.svelte.ts. */
+  --vh: calc(100dvh / var(--zoom, 1));
+  --vw: calc(100vw / var(--zoom, 1));
+  /* Ancho maximo del contenido de las paginas: en pantallas enormes todo queda centrado en vez
+     de pegado a un costado. */
+  --page-max: 1760px;
 }
 
 /* Titulo grande sobre un fondo (detalle). */
@@ -36,6 +43,9 @@
 /* Paginas de la app: el margen lateral y abajo el lugar de la barra de pestañas. */
 .view {
   padding: 22px var(--gutter) 48px;
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
 }
 @media (max-width: 759px) {
   .view {

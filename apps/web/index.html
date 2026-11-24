@@ -9,8 +9,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32 48x48" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>%BRAND_NAME%</title>
     <script>
@@ -25,6 +26,17 @@
           if (localStorage.getItem("library.reduceMotion") === "1") d.setAttribute("data-reduce-motion", "");
           var l = localStorage.getItem("library.lang");
           if (l === "en" || l === "es") d.lang = l;
+        } catch (e) {}
+        // Tamaño de la interfaz (mismas cuentas que lib/scale.svelte.ts): en un monitor 2K se
+        // agranda todo con zoom. Los lectores (#/read, #/book) van sin zoom.
+        try {
+          var s = Number(localStorage.getItem("library.uiScale")) || 0;
+          var w = window.innerWidth;
+          var f = s ? s / 100 : matchMedia("(max-width: 759px)").matches ? 1 : w >= 2300 ? 1.33 : w >= 1800 ? 1.15 : 1;
+          var z = /^#\/(read|book)\//.test(location.hash) ? 1 : f;
+          if (z !== 1) document.documentElement.style.zoom = String(z);
+          document.documentElement.style.setProperty("--zoom", String(z));
+          document.documentElement.style.setProperty("--ui-zoom", String(f));
         } catch (e) {}
       })();
     </script>

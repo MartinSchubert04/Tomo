@@ -19,6 +19,8 @@ export type Chapter = {
   name: string;
   number: number;
   scanlator: string | null;
+  /** Idioma del capitulo si la fuente lo dice ("es-419", "en"); null = el de la fuente. */
+  lang: string | null;
   date: number;
 };
 
@@ -64,6 +66,8 @@ export type LibraryEntry = {
   addedAt: number;
   lastReadAt: number | null;
   unread: number | null;
+  /** Sin leer que llegaron despues de agregarlo o de la ultima lectura. */
+  newChapters: number | null;
   latestChapterAt: number | null;
 };
 
@@ -93,6 +97,18 @@ export type Extension = {
 export type BrowseType = "popular" | "latest" | "search";
 export type BrowsePage = { items: WorkCard[]; hasNext: boolean };
 export type SearchGroup = { source: Source; items: WorkCard[]; error?: string };
+
+export type SuggestFormat = "manga" | "manhwa" | "manhua" | "novel";
+export type Suggestion = {
+  kind: "work" | "title";
+  workId?: string;
+  title: string;
+  altTitles: string[];
+  cover: string | null;
+  format: SuggestFormat | BookFormat | null;
+  year: number | null;
+  source?: string;
+};
 
 export type WorkProgress = { last: Progress | null; chapters: Record<string, Progress> };
 

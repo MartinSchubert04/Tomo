@@ -1,7 +1,7 @@
 <script lang="ts">
   // Inicio: seguir leyendo, capitulos nuevos de la biblioteca y, de la fuente principal del
   // usuario, populares y ultimos. Sin fuentes instaladas: el aviso (al admin, con el boton).
-  import { Compass, PackagePlus, Sparkles, Trash2 } from "@lucide/svelte";
+  import { Compass, PackagePlus, Sparkles, Info, Trash2 } from "@lucide/svelte";
   import ContinueCard from "../components/ContinueCard.svelte";
   import CoverCard from "../components/CoverCard.svelte";
   import PopMenu, { type PopItem } from "../components/PopMenu.svelte";
@@ -22,11 +22,29 @@
   api.library().then((l) => (library = l)).catch(() => (library = []));
   loadSources().catch(() => {});
 
+  // Solo lo que llego despues de agregarlo o de la ultima lectura (no todo lo sin leer: un manga
+  // recien agregado con 400 capitulos no es "nuevo").
   const updates = $derived(
     (library ?? [])
-      .filter((e) => e.work.kind === "manga" && (e.unread ?? 0) > 0)
+      .filter((e) => e.work.kind === "manga" && (e.newChapters ?? 0) > 0)
       .sort((a, b) => (b.latestChapterAt ?? 0) - (a.latestChapterAt ?? 0)),
   );
+
+  /** Una fila de una fuente: varias paginas hasta tener ~36 (hay fuentes que dan 10 por pagina y
+   *  la fila quedaba por la mitad en una pantalla ancha). */
+  async function fill(source: string, type: "popular" | "latest") {
+    const out: WorkCard[] = [];
+    const seen = new Set<string>();
+    for (let page = 1; page <= 4 && out.length < 36; page++) {
+      const r = await api.browse(source, type, page).catch((e) => {
+        if (page === 1) throw e;
+        return { items: [], hasNext: false };
+      });
+      for (const w of r.items) if (!seen.has(w.id)) (seen.add(w.id), out.push(w));
+      if (!r.hasNext || !r.items.length) break;
+    }
+    return out;
+  }
   const main = $derived(sources.list ? mainSource(sources.list) : null);
 
   function historyMenu(e: HistoryEntry, x: number, y: number) {
@@ -34,6 +52,11 @@
       x,
       y,
       items: [
+        {
+          label: e.work.kind === "book" ? t("book.details") : t("reader.toDetail"),
+          icon: Info,
+          run: () => go(e.work.kind === "book" ? `/books?edit=${encodeURIComponent(e.work.id)}` : `/manga/${e.work.id}`),
+        },
         {
           label: t("home.removeContinue"),
           icon: Trash2,
@@ -64,7 +87,7 @@
   {#if updates.length}
     <Row title={t("home.updates")} items={updates} href="/library">
       {#snippet card(e: LibraryEntry, i: number)}
-        <CoverCard work={e.work} {i} unread={e.unread} sub={e.work.source ?? ""} />
+        <CoverCard work={e.work} {i} unread={e.newChapters} sub={e.work.source ?? ""} />
       {/snippet}
     </Row>
   {/if}
@@ -84,7 +107,7 @@
     {#key main.id}
       <Row
         title={t("home.popularIn", { source: main.name })}
-        load={() => api.browse(main.id, "popular", 1).then((p) => p.items)}
+        load={() => fill(main.id, "popular")}
         href={`/explore/${main.id}`}
       >
         {#snippet card(w: WorkCard, i: number)}
@@ -94,7 +117,7 @@
       {#if main.supportsLatest}
         <Row
           title={t("home.latestIn", { source: main.name })}
-          load={() => api.browse(main.id, "latest", 1).then((p) => p.items)}
+          load={() => fill(main.id, "latest")}
           href={`/explore/${main.id}?type=latest`}
         >
           {#snippet card(w: WorkCard, i: number)}

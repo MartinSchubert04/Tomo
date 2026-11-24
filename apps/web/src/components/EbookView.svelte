@@ -35,8 +35,9 @@
     url,
     start = "",
     onback,
+    ontitle,
     onprogress,
-  }: { book: Book; url: string; start?: string; onback: () => void; onprogress: (cfi: string, fraction: number) => void } = $props();
+  }: { book: Book; url: string; start?: string; onback: () => void; ontitle?: () => void; onprogress: (cfi: string, fraction: number) => void } = $props();
 
   let host = $state<HTMLDivElement>();
   let view: FoliateView | null = null;
@@ -200,7 +201,11 @@
     <header class="bar top" transition:barTop>
       <button class="icon-btn" onclick={onback} aria-label={t("common.back")}><ArrowLeft size={20} /></button>
       <div class="titles">
-        <span class="t1 ellipsis">{book.title}</span>
+        {#if ontitle}
+          <button class="t1 ellipsis link" onclick={ontitle} title={t("book.details")}>{book.title}</button>
+        {:else}
+          <span class="t1 ellipsis">{book.title}</span>
+        {/if}
         {#if section}<span class="t2 ellipsis">{section}</span>{:else if book.author}<span class="t2 ellipsis">{book.author}</span>{/if}
       </div>
       {#if toc.length}<button class="icon-btn" onclick={() => (tocOpen = true)} title={t("book.toc")}><List size={19} /></button>{/if}
@@ -296,7 +301,9 @@
       opacity: 0.5;
     }
   }
+  /* Sin zoom en el lector; las barras si se agrandan con "Tamaño de la interfaz" (lib/scale.svelte.ts). */
   .bar {
+    zoom: var(--ui-zoom, 1);
     position: absolute;
     left: 0;
     right: 0;
@@ -338,6 +345,16 @@
   .t1 {
     font-weight: 650;
     font-size: 14px;
+  }
+  .link {
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+  .link:hover {
+    text-decoration-color: currentColor;
   }
   .t2 {
     font-size: 12px;

@@ -26,7 +26,19 @@ export function loadSources(force = false): Promise<Source[]> {
   return loading;
 }
 
-const SPANISH = ["es", "es-419", "all"];
+/** Los idiomas de fuente que se ven si el usuario no eligio: español, latino y multi-idioma. */
+export const DEFAULT_LANGS = ["es", "es-419", "all"];
+
+/** Los idiomas de fuente elegidos (Ajustes → Fuentes). */
+export function sourceLangs(): string[] {
+  return session.prefs.sourceLangs ?? DEFAULT_LANGS;
+}
+
+export function setSourceLangs(langs: string[]) {
+  setPrefs({ sourceLangs: langs });
+}
+
+const SPANISH = DEFAULT_LANGS;
 
 /** Las fuentes para mostrar: las fijadas primero (en su orden), despues las en español, despues
  *  el resto. Sin NSFW salvo que el usuario las pida. */
@@ -42,9 +54,36 @@ export function orderedSources(list: Source[]): Source[] {
   return [...ok].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
-/** La fuente principal del usuario (inicio): la primera fijada, o la primera en español. */
+/** Las fuentes para elegir: las de los idiomas del usuario y las fijadas (aunque sean de otro
+ *  idioma). Con `all`, todas. MangaDex sola trae ~40 variantes (una por idioma): sin este filtro
+ *  Explorar era una lista de "MangaDex (AF)", "MangaDex (AR)"... */
+export function visibleSources(list: Source[], all = false): Source[] {
+  const langs = sourceLangs();
+  const ordered = orderedSources(list);
+  if (all || !langs.length) return ordered;
+  return ordered.filter((s) => isPinned(s.id) || langs.includes(s.lang));
+}
+
+/** La fuente principal del usuario (inicio): la primera fijada, o la primera de sus idiomas. */
 export function mainSource(list: Source[]): Source | null {
-  return orderedSources(list)[0] ?? null;
+  return visibleSources(list)[0] ?? orderedSources(list)[0] ?? null;
+}
+
+/** Fuentes para la busqueda global: las fijadas o, sin fijadas, las de sus idiomas (12 como
+ *  mucho, igual que el server). */
+export function searchSources(list: Source[]): string[] {
+  const pinned = (session.prefs.sources ?? []).filter((id) => list.some((s) => s.id === id));
+  if (pinned.length) return pinned;
+  return visibleSources(list)
+    .slice(0, 12)
+    .map((s) => s.id);
+}
+
+/** Los idiomas que tienen las fuentes instaladas, los del usuario primero. */
+export function installedLangs(list: Source[]): string[] {
+  const mine = sourceLangs();
+  const all = [...new Set(list.map((s) => s.lang))];
+  return all.sort((a, b) => Number(mine.includes(b)) - Number(mine.includes(a)) || a.localeCompare(b));
 }
 
 export function isPinned(id: string) {

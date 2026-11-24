@@ -2,6 +2,7 @@
 // salen enseguida y su demora no se puede cambiar. Cada `title` se pasa a `data-tip` apenas
 // aparece (asi el del navegador nunca sale) y aca se muestra uno propio si el mouse se queda
 // quieto un rato. Los componentes siguen usando `title={...}` como siempre.
+import { zf } from "./scale.svelte";
 
 /** Cuanto hay que dejar el mouse encima para que aparezca. */
 const DELAY = 700;
@@ -42,12 +43,14 @@ function show(el: HTMLElement) {
   document.body.appendChild(tip);
   // Debajo del elemento y centrado; arriba si no entra, y siempre dentro de la ventana.
   const r = el.getBoundingClientRect();
-  const w = tip.offsetWidth;
-  const h = tip.offsetHeight;
+  // Rects en px de la ventana, offsetWidth y style en px CSS: con zoom no son lo mismo.
+  const z = zf();
+  const w = tip.offsetWidth * z;
+  const h = tip.offsetHeight * z;
   const left = Math.min(Math.max(6, r.left + r.width / 2 - w / 2), innerWidth - w - 6);
   const top = r.bottom + 6 + h > innerHeight - 6 ? r.top - 6 - h : r.bottom + 6;
-  tip.style.left = `${left}px`;
-  tip.style.top = `${Math.max(6, top)}px`;
+  tip.style.left = `${left / z}px`;
+  tip.style.top = `${Math.max(6, top) / z}px`;
 }
 
 let installed = false;

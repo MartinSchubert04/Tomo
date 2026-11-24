@@ -25,6 +25,9 @@ function brandPlugin(): Plugin {
       theme_color: brand.themeColor,
       icons: [
         { src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+        { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         { src: "icon-maskable.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
       ],
     });

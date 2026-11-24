@@ -44,7 +44,10 @@ type Chapter = {
   id: string;
   name: string;           // as the source gives it ("Capítulo 12: ...")
   number: number;         // -1 if unknown
-  scanlator: string | null;
+  scanlator: string | null; // without the language prefix ("[es-la] Grupo" → "Grupo")
+  lang: string | null;    // "es-419", "en"... when the source says it (multi-language sources put
+                          // it as a "[xx]" prefix of the scanlator; es-la is normalized to es-419);
+                          // null = the source's language
   date: number;           // upload date, ms (0 if unknown)
 };
 
@@ -57,7 +60,8 @@ type MangaDetail = WorkCard & {
   genres: string[];
   status: "ongoing" | "completed" | "hiatus" | "cancelled" | "unknown";
   url: string | null;     // page on the original site
-  chapters: Chapter[];    // newest first
+  chapters: Chapter[];    // newest first. The same number can appear more than once (one per
+                          // language or scan group): the UI shows one row per number
 };
 
 type Book = WorkCard & {
@@ -121,10 +125,23 @@ type Extension = {
 |---|---|---|
 | GET | `/api/sources` | `Source[]`: installed sources, without "Local source" |
 | GET | `/api/sources/{sourceId}/browse?type=popular\|latest\|search&q=&page=1` | `{ items: WorkCard[], hasNext: boolean }` |
-| GET | `/api/search?q=&sources=id1,id2` | **NDJSON stream** (`application/x-ndjson`): one line per source as soon as it answers, `{ source: Source, items: WorkCard[], error?: string }`. Without `sources`: the user's pinned sources (`prefs.sources`), or else every installed source whose lang is `es`, `es-419` or `all`, at most 12. Each source has 15 s; 6 in parallel |
+| GET | `/api/search?q=&sources=id1,id2&alt=&alt=&resolve=1` | **NDJSON stream** (`application/x-ndjson`): one line per source as soon as it answers, `{ source: Source, items: WorkCard[], error?: string }`. Without `sources`: the user's pinned sources (`prefs.sources`), or else every installed source whose lang is `es`, `es-419` or `all`, at most 12 (the UI sends the ones of the user's source languages). Each source has 15 s; 6 in parallel. **Other titles:** `alt` (repeatable) are other names of the same work (from `/api/suggest`); each source is searched with the alts first and then `q`, at most 3 searches, results merged without repeats (by work id), `error` only if all failed. Without `alt`, `resolve=1` asks AniList (1 s at most) whether `q` is the name of a work in another language and, if so, uses its titles. When other titles were used, the **first line** is `{ alts: string[] }` (the titles besides `q`) |
+| GET | `/api/suggest?q=` | `Suggestion[]` while typing (≥ 2 chars): first the known cards (any manga someone opened, added or read, and uploaded books) that match, the user's library and history first; then AniList titles: one that matches a known card becomes that card (with its other titles), the rest come as `kind: "title"`. Never fails because of AniList (cached 24 h per query, ≤ 25 requests per minute for the whole server, 2.5 s timeout); adult works only with `prefs.nsfw` |
+| GET | `/api/img/al/{path}` | AniList covers through the server (`https://s4.anilist.co/{path}`, only `file/anilistcdn/...`), `Cache-Control: private, max-age=31536000, immutable`. The browser never talks to AniList |
 
 ```ts
 type Source = { id: string; name: string; lang: string; icon: string; supportsLatest: boolean; nsfw: "safe" | "mixed" | "nsfw" };
+
+type Suggestion = {
+  kind: "work" | "title";   // work: exists here (open it); title: search the sources with its names
+  workId?: string;          // kind "work"
+  title: string;            // the card's title, or AniList's romaji
+  altTitles: string[];      // other names (romaji, English, synonyms, native)
+  cover: string | null;     // /api/img/s/..., /api/books/{id}/cover or /api/img/al/...
+  format: "manga" | "manhwa" | "manhua" | "novel" | BookFormat | null;
+  year: number | null;
+  source?: string;          // kind "work": the source name or "Upload"
+};
 ```
 
 ## Manga
@@ -156,7 +173,9 @@ type LibraryEntry = {
   favorite: boolean;
   addedAt: number;
   lastReadAt: number | null;
-  unread: number | null;          // manga: chapters not marked done; books: null
+  unread: number | null;          // manga: chapter numbers not read (any version read counts); books: null
+  newChapters: number | null;     // manga: unread numbers that arrived after it was added or last read
+                                  // (max(upload date, first seen) > max(addedAt, last read)); books: null
   latestChapterAt: number | null; // manga: date of the newest chapter
 };
 
@@ -164,7 +183,8 @@ type HistoryEntry = {
   work: WorkCard;
   progress: Progress;
   chapterName: string | null;     // manga
-  nextChapter: string | null;     // manga: id of the next chapter if this one is done
+  nextChapter: string | null;     // manga: id of the next chapter number if this one is done (same
+                                  // language and scan group when that number has them)
 };
 ```
 
@@ -172,7 +192,9 @@ The server keeps a copy of each work's card (`title`, `cover`, `source`) when it
 library or read, so the library and history load without asking Suwayomi.
 
 **Library updates.** Every 6 h (and 30 s after starting) the server asks for the chapters of every
-manga in anyone's library (3 at a time). `unread` and `latestChapterAt` come from there.
+manga in anyone's library (3 at a time). `unread`, `newChapters` and `latestChapterAt` come from
+there. Each chapter remembers when it was first seen: the ones of the first fetch count as already
+there, so adding a manga with 400 chapters doesn't make 400 "new" ones.
 
 ## Books (uploads, shared by all users)
 

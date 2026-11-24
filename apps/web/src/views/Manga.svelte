@@ -14,12 +14,13 @@
     Trash2,
   } from "@lucide/svelte";
   import ChapterList from "../components/ChapterList.svelte";
+  import { groupChapters, groupOf, pickVariant, preferredScan, setPreferredScan } from "../lib/chapters";
   import Img from "../components/Img.svelte";
   import PopMenu, { type PopItem } from "../components/PopMenu.svelte";
   import { api, errText } from "../lib/api";
   import { chapterShort } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
-  import { expand } from "../lib/motion";
+  import { expand, fadeQuick, pop } from "../lib/motion";
   import { back, go, route } from "../lib/router.svelte";
   import { attempt, toast } from "../lib/toast.svelte";
   import { LIBRARY_STATUSES, type Chapter, type LibraryEntry, type LibraryStatus, type MangaDetail, type WorkProgress } from "../lib/types";
@@ -33,6 +34,8 @@
   let refreshing = $state(false);
   let more = $state(false);
   let menu = $state<{ x: number; y: number; items: PopItem[] } | null>(null);
+  // La portada en grande (tocar la portada).
+  let zoomCover = $state(false);
 
   async function load(refresh = false) {
     error = "";
@@ -52,25 +55,35 @@
     refreshing = false;
   }
 
-  // A donde lleva "Leer": donde quedo (o el siguiente si lo termino), o el primer capitulo.
+  // A donde lleva "Leer": donde quedo (o el numero siguiente si lo termino, en el mismo idioma y
+  // scan si esta), o el primer capitulo. Por numero, no por version (lib/chapters.ts).
+  const groups = $derived(manga ? groupChapters(manga.chapters) : []);
   const resume = $derived.by((): { chapter: Chapter; page: string; label: string } | null => {
-    if (!manga?.chapters.length) return null;
-    const chs = manga.chapters;
+    if (!groups.length) return null;
     const last = progress.last;
+    const preferScan = preferredScan(id);
     if (last?.chapter) {
-      const i = chs.findIndex((c) => c.id === last.chapter);
-      if (i >= 0) {
-        if (last.done && i > 0) return { chapter: chs[i - 1], page: "0", label: t("manga.continueAt", { ch: chapterShort(chs[i - 1]) }) };
-        if (!last.done) return { chapter: chs[i], page: last.position, label: t("manga.continueAt", { ch: chapterShort(chs[i]) }) };
+      const gi = groupOf(groups, last.chapter);
+      const lastCh = gi >= 0 ? groups[gi].variants.find((v) => v.id === last.chapter) : undefined;
+      if (lastCh) {
+        if (last.done && gi > 0) {
+          const next = pickVariant(groups[gi - 1], { lang: lastCh.lang, scan: lastCh.scanlator, preferScan });
+          return { chapter: next, page: "0", label: t("manga.continueAt", { ch: chapterShort(next) }) };
+        }
+        if (!last.done) return { chapter: lastCh, page: last.position, label: t("manga.continueAt", { ch: chapterShort(lastCh) }) };
       }
     }
-    const first = chs[chs.length - 1];
+    const first = pickVariant(groups[groups.length - 1], { preferScan });
     return { chapter: first, page: "0", label: t("manga.startReading") };
   });
 
   function open(c: Chapter, page = "0") {
+    // El scan que se elige queda como preferido de este manga (el siguiente sigue con ese).
+    if (c.scanlator) setPreferredScan(id, c.scanlator);
     go(`/read/${id}/${c.id}` + (page !== "0" ? `?page=${encodeURIComponent(page)}` : ""));
   }
+
+  const authors = $derived(manga ? [manga.author, manga.artist && manga.artist !== manga.author ? manga.artist : null].filter((a): a is string => !!a) : []);
 
   async function setStatus(status: LibraryStatus) {
     await attempt(async () => {
@@ -140,10 +153,13 @@
       </div>
     </div>
   {:else}
+    <div class="layout">
     <div class="view top">
       <div class="cover">
         {#if manga}
-          <Img src={manga.cover} eager fallback={manga.title} vt={`cover-${id}`} />
+          <button class="cover-btn" onclick={() => manga?.cover && (zoomCover = true)} title={t("manga.viewCover")} aria-label={t("manga.viewCover")} disabled={!manga.cover}>
+            <Img src={manga.cover} eager fallback={manga.title} vt={`cover-${id}`} />
+          </button>
         {:else}
           <div class="skel fill" style="view-transition-name: cover-{id}"></div>
         {/if}
@@ -151,22 +167,30 @@
       <div class="info">
         {#if manga}
           <h1 class="display-title">{manga.title}</h1>
-          <div class="by muted">
-            {[manga.author, manga.artist && manga.artist !== manga.author ? manga.artist : null].filter(Boolean).join(" · ") || t("manga.unknownAuthor")}
-          </div>
+          {#if authors.length}
+            <div class="by muted">
+              {#each authors as a, i (a)}{#if i > 0}{" · "}{/if}<button class="link-text" onclick={() => go(`/search?q=${encodeURIComponent(a)}`)} title={t("manga.searchAuthor", { name: a })}>{a}</button>{/each}
+            </div>
+          {/if}
           <div class="chips">
-            <span class="chip" class:ok={manga.status === "completed"} class:accent={manga.status === "ongoing"}>{statusLabel}</span>
-            {#if manga.source}<span class="chip">{manga.source}</span>{/if}
-            <span class="chip">{t("manga.chapters", { n: manga.chapters.length })}</span>
+            {#if manga.status !== "unknown"}
+              <span class="chip" class:ok={manga.status === "completed"} class:accent={manga.status === "ongoing"}>{statusLabel}</span>
+            {/if}
+            {#if manga.source}
+              <button class="chip click" onclick={() => go(`/explore/${manga?.sourceId}`)} title={t("manga.exploreSource", { source: manga.source })}>{manga.source}</button>
+            {/if}
+            <span class="chip">{t("manga.chapters", { n: groups.length })}</span>
           </div>
           {#if manga.genres.length}
             <div class="genres">
-              {#each manga.genres as g (g)}<span class="genre">{g}</span>{/each}
+              {#each manga.genres as g (g)}
+                <button class="genre" onclick={() => go(`/explore/${manga?.sourceId}?q=${encodeURIComponent(g)}`)} title={t("manga.searchGenre", { genre: g, source: manga.source ?? "" })}>{g}</button>
+              {/each}
             </div>
           {/if}
           <div class="actions">
             {#if resume}
-              <button class="btn primary lg" onclick={() => open(resume.chapter, resume.page)}>
+              <button class="btn primary lg" onclick={() => open(resume.chapter, resume.page)} title={t("keys.read") + " (R)"}>
                 <BookOpenText size={18} /><span class="ellipsis">{resume.label}</span>
               </button>
             {/if}
@@ -207,7 +231,7 @@
     <div class="view chapters">
       {#if manga}
         <div transition:expand>
-          <ChapterList chapters={manga.chapters} progress={progress.chapters} current={progress.last?.chapter ?? ""} onopen={(c) => open(c, progress.chapters[c.id] && !progress.chapters[c.id].done ? progress.chapters[c.id].position : "0")} onmark={mark} />
+          <ChapterList work={id} chapters={manga.chapters} progress={progress.chapters} current={progress.last?.chapter ?? ""} onopen={(c) => open(c, progress.chapters[c.id] && !progress.chapters[c.id].done ? progress.chapters[c.id].position : "0")} onmark={mark} />
         </div>
       {:else}
         {#each Array(8) as _, i (i)}
@@ -215,8 +239,26 @@
         {/each}
       {/if}
     </div>
+    </div>
   {/if}
 </div>
+
+{#if zoomCover && manga?.cover}
+  <div class="lightbox" role="presentation" onclick={() => (zoomCover = false)} transition:fadeQuick>
+    <img src={manga.cover} alt={manga.title} in:pop={{ start: 0.92 }} />
+  </div>
+{/if}
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape" && zoomCover) return (zoomCover = false), e.preventDefault();
+    // R: leer / seguir leyendo (lib/shortcuts.ts).
+    const typing = (e.target as HTMLElement)?.closest?.("input, textarea, [contenteditable]");
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "r" || e.key === "R") && resume) {
+      e.preventDefault();
+      open(resume.chapter, resume.page);
+    }
+  }}
+/>
 
 {#if menu}<PopMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />{/if}
 
@@ -315,6 +357,56 @@
     padding: 3px 9px;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--panel-2) 80%, transparent);
+    border: var(--border) solid transparent;
+    transition:
+      color 0.15s,
+      border-color 0.15s,
+      transform 0.15s;
+  }
+  .genre:hover {
+    color: var(--text);
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
+  }
+  .chip.click {
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .chip.click:hover {
+    border-color: var(--accent);
+  }
+  .link-text {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s, color 0.15s;
+  }
+  .link-text:hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
+  }
+  .cover-btn {
+    position: absolute;
+    inset: 0;
+    cursor: zoom-in;
+  }
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: color-mix(in srgb, var(--media-bg) 82%, transparent);
+    backdrop-filter: blur(10px);
+    cursor: zoom-out;
+  }
+  .lightbox img {
+    max-width: 100%;
+    max-height: calc(var(--vh) - 48px);
+    border-radius: var(--radius);
+    box-shadow: var(--pop-shadow);
   }
   .actions {
     display: flex;
@@ -376,7 +468,31 @@
   }
   .chapters {
     padding-top: 8px;
-    max-width: 980px;
+  }
+  /* Pantallas anchas (ancho util ≥ 1400 px CSS, ver lib/scale.svelte.ts): dos columnas, la ficha
+     fija a la izquierda y los capitulos llenando la derecha. */
+  @container page (min-width: 1400px) {
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(440px, 0.85fr) 1.15fr;
+      align-items: start;
+      max-width: var(--page-max);
+      margin: 0 auto;
+    }
+    .top {
+      position: sticky;
+      top: 0;
+      max-height: calc(var(--vh) - 70px);
+      overflow-y: auto;
+      grid-template-columns: 180px 1fr;
+      gap: 24px;
+      padding-right: 12px;
+      scrollbar-width: none;
+    }
+    .chapters {
+      max-width: none;
+      padding-top: 22px;
+    }
   }
   .ch-skel {
     display: flex;

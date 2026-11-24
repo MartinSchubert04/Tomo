@@ -1,11 +1,12 @@
 <script lang="ts">
   // Historial: todo lo que se leyo, lo ultimo arriba, agrupado por dia. Tocar sigue donde quedo;
   // el menu lo saca de "Seguir leyendo" (las marcas de leido quedan).
-  import { History, Trash2 } from "@lucide/svelte";
+  import { History, Info, Trash2 } from "@lucide/svelte";
   import { flip } from "svelte/animate";
   import ContinueCard from "../components/ContinueCard.svelte";
   import PopMenu, { type PopItem } from "../components/PopMenu.svelte";
   import { api } from "../lib/api";
+  import { go } from "../lib/router.svelte";
   import { date, t } from "../lib/i18n.svelte";
   import { flipMs } from "../lib/motion";
   import { attempt } from "../lib/toast.svelte";
@@ -40,6 +41,11 @@
       x,
       y,
       items: [
+        {
+          label: e.work.kind === "book" ? t("book.details") : t("reader.toDetail"),
+          icon: Info,
+          run: () => go(e.work.kind === "book" ? `/books?edit=${encodeURIComponent(e.work.id)}` : `/manga/${e.work.id}`),
+        },
         {
           label: t("home.removeContinue"),
           icon: Trash2,

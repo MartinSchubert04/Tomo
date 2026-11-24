@@ -1,7 +1,7 @@
 {
   "name": "@library/web",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "palettes": "python scripts/palettes.py"
+    "palettes": "python scripts/palettes.py",
+    "icons": "node scripts/icons.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.3.0",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tsconfig/svelte": "5.0.8",
+    "sharp": "0.35.5",
     "svelte": "5.57.2",
     "svelte-check": "4.7.6",
     "typescript": "5.9.3",

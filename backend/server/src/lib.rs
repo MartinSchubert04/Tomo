@@ -4,6 +4,7 @@
 //!
 //! Rutas: `/api/*` (ver `docs/API.md`) y, si hay `web_dir`, la UI compilada en `/`.
 pub mod admin;
+pub mod anilist;
 pub mod auth;
 pub mod bookmeta;
 pub mod books;
@@ -13,6 +14,7 @@ pub mod error;
 pub mod library;
 pub mod manga;
 pub mod state;
+pub mod suggest;
 pub mod suwayomi;
 pub mod updater;
 pub mod web;
@@ -90,6 +92,8 @@ pub fn build_state(cfg: Config, db: Db) -> anyhow::Result<AppState> {
     Ok(AppState {
         auth: auth::Auth::new(db.clone()),
         suwa: suwayomi::Suwayomi::new(&cfg.suwayomi_url)?,
+        anilist: anilist::AniList::new(&cfg.anilist_url)?,
+        anilist_img: reqwest::Client::builder().timeout(Duration::from_secs(15)).build()?,
         db,
         cfg: Arc::new(cfg),
     })
@@ -163,6 +167,7 @@ pub fn app(state: AppState) -> Router {
         .merge(auth::routes())
         .merge(admin::routes())
         .merge(manga::routes())
+        .merge(suggest::routes())
         .merge(library::routes())
         .merge(books::routes())
         // Ningún cuerpo JSON necesita más (las preferencias tienen su propio tope de 64 KB). La

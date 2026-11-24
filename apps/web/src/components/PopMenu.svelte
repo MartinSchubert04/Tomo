@@ -17,6 +17,7 @@
   import { onMount, tick } from "svelte";
   import { t } from "../lib/i18n.svelte";
   import { pop } from "../lib/motion";
+  import { toCss } from "../lib/scale.svelte";
 
   let {
     x,
@@ -29,7 +30,8 @@
 
   let el = $state<HTMLDivElement>();
   // svelte-ignore state_referenced_locally
-  let pos = $state({ left: x, top: y });
+  // x, y llegan en px de la ventana (clientX, rects); style va en px CSS (ver lib/scale.svelte.ts).
+  let pos = $state({ left: toCss(x), top: toCss(y) });
   let busy = $state(-1);
   // Al cerrarse, el foco vuelve a lo que lo abrio si quedo en la nada (con el control remoto de
   // la TV, la proxima flecha seguiria desde ahi y no desde cualquier lado).
@@ -52,7 +54,7 @@
     const r = el.getBoundingClientRect();
     const left = Math.max(8, Math.min(x, innerWidth - r.width - 8));
     const top = y + r.height > innerHeight - 8 ? Math.max(8, y - r.height) : y;
-    pos = { left, top };
+    pos = { left: toCss(left), top: toCss(top) };
     el.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
   });
 
@@ -117,7 +119,7 @@
     position: fixed;
     z-index: 95;
     min-width: 200px;
-    max-width: min(320px, calc(100vw - 16px));
+    max-width: min(320px, calc(var(--vw) - 16px));
     padding: 5px;
     border-radius: var(--radius);
     background: var(--sidebar);

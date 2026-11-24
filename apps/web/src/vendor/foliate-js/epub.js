@@ -573,8 +573,43 @@ const deobfuscate = async (key, length, blob) => {
     return new Blob([array, blob.slice(length)], { type: blob.type })
 }
 
+// [library] crypto.subtle solo existe en contextos seguros (https o localhost). La app tambien se
+// abre por http en la tailnet (http://mrtn-server:7710): ahi se usa este SHA-1 en JS. Sin esto,
+// un EPUB con fuentes ofuscadas no abria.
+const jsSHA1 = bytes => {
+    const ml = bytes.length
+    const withPad = new Uint8Array(((ml + 9 + 63) >> 6) << 6)
+    withPad.set(bytes)
+    withPad[ml] = 0x80
+    const dv = new DataView(withPad.buffer)
+    dv.setUint32(withPad.length - 4, ml * 8)
+    dv.setUint32(withPad.length - 8, Math.floor(ml / 0x20000000))
+    let [h0, h1, h2, h3, h4] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]
+    const w = new Uint32Array(80)
+    const rol = (x, n) => (x << n) | (x >>> (32 - n))
+    for (let off = 0; off < withPad.length; off += 64) {
+        for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4)
+        for (let i = 16; i < 80; i++) w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1)
+        let [a, b, c, d, e] = [h0, h1, h2, h3, h4]
+        for (let i = 0; i < 80; i++) {
+            const [f, k] = i < 20 ? [(b & c) | (~b & d), 0x5a827999]
+                : i < 40 ? [b ^ c ^ d, 0x6ed9eba1]
+                : i < 60 ? [(b & c) | (b & d) | (c & d), 0x8f1bbcdc]
+                : [b ^ c ^ d, 0xca62c1d6]
+            const t = (rol(a, 5) + f + e + k + w[i]) >>> 0
+            e = d; d = c; c = rol(b, 30) >>> 0; b = a; a = t
+        }
+        h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0; h4 = (h4 + e) >>> 0
+    }
+    const out = new Uint8Array(20)
+    const ov = new DataView(out.buffer)
+    ;[h0, h1, h2, h3, h4].forEach((h, i) => ov.setUint32(i * 4, h))
+    return out
+}
+
 const WebCryptoSHA1 = async str => {
     const data = new TextEncoder().encode(str)
+    if (!globalThis.crypto?.subtle) return jsSHA1(data)
     const buffer = await globalThis.crypto.subtle.digest('SHA-1', data)
     return new Uint8Array(buffer)
 }

@@ -27,6 +27,11 @@ impl Drop for TempDir {
 }
 
 async fn setup(suwayomi: Option<String>) -> T {
+    setup_with(suwayomi, None).await
+}
+
+/// Con un AniList falso (`anilist`); sin él, AniList apagado (los tests nunca salen a la red).
+async fn setup_with(suwayomi: Option<String>, anilist: Option<String>) -> T {
     let dir = std::env::temp_dir().join(format!("library-test-{}-{}", std::process::id(), library::auth::new_token()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut cfg = Config::new(&dir);
@@ -34,6 +39,7 @@ async fn setup(suwayomi: Option<String>) -> T {
     cfg.max_upload_bytes = 5 * 1024 * 1024;
     // Sin Suwayomi: un puerto donde no escucha nadie.
     cfg.suwayomi_url = suwayomi.unwrap_or_else(|| "http://127.0.0.1:9".into());
+    cfg.anilist_url = anilist.unwrap_or_default();
     let db = Db::open_in_memory().unwrap();
     db.call(|c| {
         create_user(c, "admin", "secreto1", true)?;
@@ -295,9 +301,12 @@ async fn fake_graphql(axum::Json(body): axum::Json<Value>) -> axum::Json<Value> 
         if vars["source"] == "22" {
             json!({ "data": null, "errors": [{ "message": "Exception while fetching data (/fetchSourceManga) : HTTP 403 Cloudflare\n\tat x.y" }] })
         } else {
-            json!({ "data": { "fetchSourceManga": { "hasNextPage": true, "mangas": [
-                { "id": 7, "title": format!("{} 1", vars["query"].as_str().unwrap_or("Pop")), "thumbnailUrl": "/api/v1/manga/7/thumbnail", "source": { "displayName": "Buena (ES)" } }
-            ] } } })
+            let query = vars["query"].as_str().unwrap_or("Pop");
+            let mut mangas = vec![json!({ "id": 7, "title": format!("{query} 1"), "thumbnailUrl": "/api/v1/manga/7/thumbnail", "source": { "displayName": "Buena (ES)" } })];
+            if query.contains("Shingeki") {
+                mangas.push(json!({ "id": 8, "title": "Shingeki no Kyojin", "thumbnailUrl": "/api/v1/manga/8/thumbnail", "source": { "displayName": "Buena (ES)" } }));
+            }
+            json!({ "data": { "fetchSourceManga": { "hasNextPage": true, "mangas": mangas } } })
         }
     } else if q.contains("manga(id") && q.contains("chapters") {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -309,7 +318,8 @@ async fn fake_graphql(axum::Json(body): axum::Json<Value>) -> axum::Json<Value> 
             "chapters": { "nodes": [
                 { "id": 101, "name": "Cap 1", "chapterNumber": 1.0, "scanlator": "", "uploadDate": "1000", "sourceOrder": 1 },
                 { "id": 103, "name": "Cap 3", "chapterNumber": 3.0, "scanlator": "Scan X", "uploadDate": "3000", "sourceOrder": 3 },
-                { "id": 102, "name": "Cap 2", "chapterNumber": 2.0, "scanlator": null, "uploadDate": "2000", "sourceOrder": 2 }
+                { "id": 102, "name": "Cap 2", "chapterNumber": 2.0, "scanlator": null, "uploadDate": "2000", "sourceOrder": 2 },
+                { "id": 104, "name": "Cap 3", "chapterNumber": 3.0, "scanlator": "[es-la] Scan Y", "uploadDate": "3500", "sourceOrder": 4 }
             ] } } } })
     } else if q.contains("fetchChapterPages") {
         json!({ "data": { "fetchChapterPages": { "pages": ["/api/v1/manga/7/chapter/101/page/0", "/api/v1/manga/7/chapter/101/page/1"] } } })
@@ -379,10 +389,14 @@ async fn manga_through_suwayomi() {
     assert_eq!(d["artist"], Value::Null);
     assert_eq!(d["sourceId"], "11");
     let ids: Vec<&str> = d["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["103", "102", "101"]);
-    assert_eq!(d["chapters"][0]["scanlator"], "Scan X");
-    assert_eq!(d["chapters"][2]["scanlator"], Value::Null);
-    assert_eq!(d["chapters"][0]["date"], 3000);
+    assert_eq!(ids, ["104", "103", "102", "101"]);
+    // El idioma sale del prefijo del scan ("[es-la] Scan Y" → es-419, "Scan Y").
+    assert_eq!(d["chapters"][0]["lang"], "es-419");
+    assert_eq!(d["chapters"][0]["scanlator"], "Scan Y");
+    assert_eq!(d["chapters"][1]["scanlator"], "Scan X");
+    assert_eq!(d["chapters"][1]["lang"], Value::Null);
+    assert_eq!(d["chapters"][3]["scanlator"], Value::Null);
+    assert_eq!(d["chapters"][1]["date"], 3000);
     let (s, _) = t.json(Method::GET, "/api/manga/x7", Some(&c), None).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 
@@ -401,8 +415,10 @@ async fn manga_through_suwayomi() {
 
     // Biblioteca con no leídos, progreso, siguiente capítulo.
     let (_, e) = t.json(Method::PUT, "/api/library/s7", Some(&c), Some(json!({ "status": "reading" }))).await;
+    // Tres números (el 3 está dos veces): se cuentan por número. Recién agregado, nada es "nuevo".
     assert_eq!(e["unread"], 3);
-    assert_eq!(e["latestChapterAt"], 3000);
+    assert_eq!(e["newChapters"], 0);
+    assert_eq!(e["latestChapterAt"], 3500);
     assert_eq!(e["work"]["source"], "Buena (ES)");
     let res = t.req(Method::PUT, "/api/progress/s7", Some(&c), Some(json!({ "chapter": "101", "position": "39", "fraction": 1.0, "done": true }))).await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
@@ -415,7 +431,7 @@ async fn manga_through_suwayomi() {
     let res = t.req(Method::POST, "/api/progress/s7/mark", Some(&c), Some(json!({ "chapters": ["102", "103"], "done": true }))).await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
     let (_, lib) = t.json(Method::GET, "/api/library", Some(&c), None).await;
-    assert_eq!(lib[0]["unread"], 0);
+    assert_eq!(lib[0]["unread"], 0, "leer el 103 cuenta para el 3 (también está el 104)");
     t.req(Method::POST, "/api/progress/s7/mark", Some(&c), Some(json!({ "chapters": ["103"], "done": false }))).await;
     let (_, p) = t.json(Method::GET, "/api/progress/s7", Some(&c), None).await;
     assert_eq!(p["chapters"]["103"]["done"], false);
@@ -434,4 +450,79 @@ async fn suwayomi_down() {
     assert_eq!(h["suwayomi"], false);
     let (s, _) = t.json(Method::GET, "/api/nope", Some(&c), None).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+// ---------- AniList falso ----------
+
+async fn fake_anilist() -> String {
+    let app = Router::new().route(
+        "/",
+        post(|axum::Json(body): axum::Json<Value>| async move {
+            let q = body["variables"]["q"].as_str().unwrap_or("").to_lowercase();
+            let media = if q.contains("attack") || q.contains("titan") || q.contains("berserk") {
+                json!([
+                    { "id": 53390, "title": { "romaji": "Shingeki no Kyojin", "english": "Attack on Titan", "native": "進撃の巨人" },
+                      "synonyms": ["AoT"], "coverImage": { "medium": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/small/bx53390.jpg" },
+                      "format": "MANGA", "countryOfOrigin": "JP", "startDate": { "year": 2009 }, "isAdult": false },
+                    { "id": 30002, "title": { "romaji": "Berserk", "english": "Attack Berserk", "native": "ベルセルク" },
+                      "synonyms": [], "coverImage": { "medium": null }, "format": "MANGA", "countryOfOrigin": "JP", "startDate": { "year": 1989 }, "isAdult": false }
+                ])
+            } else {
+                json!([])
+            };
+            axum::Json(json!({ "data": { "Page": { "media": media } } }))
+        }),
+    );
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+    format!("http://{addr}/")
+}
+
+async fn ndjson(t: &T, uri: &str, cookie: &str) -> Vec<Value> {
+    let res = t.req(Method::GET, uri, Some(cookie), None).await;
+    let text = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    text.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+#[tokio::test]
+async fn suggestions_and_other_titles() {
+    let t = setup_with(Some(fake_suwayomi().await), Some(fake_anilist().await)).await;
+    let c = t.login("ana", "secreto2").await;
+    // Berserk queda conocido (tarjeta guardada) al abrir la ficha.
+    let (s, _) = t.json(Method::GET, "/api/manga/s7", Some(&c), None).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Lo conocido por texto y, por AniList, los títulos en otros idiomas.
+    let (s, v) = t.json(Method::GET, "/api/suggest?q=attack", Some(&c), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let v = v.as_array().unwrap();
+    assert_eq!(v[0]["kind"], "title");
+    assert_eq!(v[0]["title"], "Shingeki no Kyojin");
+    assert_eq!(v[0]["altTitles"][0], "Attack on Titan");
+    assert_eq!(v[0]["format"], "manga");
+    assert_eq!(v[0]["year"], 2009);
+    assert_eq!(v[0]["cover"], "/api/img/al/file/anilistcdn/media/manga/cover/small/bx53390.jpg");
+    // "Attack Berserk" es Berserk, que ya existe: abre la ficha.
+    assert_eq!(v[1]["kind"], "work");
+    assert_eq!(v[1]["workId"], "s7");
+    assert_eq!(v[1]["altTitles"][0], "Attack Berserk");
+    let (_, v) = t.json(Method::GET, "/api/suggest?q=bers", Some(&c), None).await;
+    assert_eq!(v[0]["workId"], "s7", "lo conocido primero");
+    let (_, v) = t.json(Method::GET, "/api/suggest?q=a", Some(&c), None).await;
+    assert!(v.as_array().unwrap().is_empty(), "muy corto");
+
+    // Búsqueda con otros títulos: cada fuente busca los dos y se juntan sin repetir.
+    let lines = ndjson(&t, "/api/search?q=attack%20on%20titan&alt=Shingeki%20no%20Kyojin&sources=11", &c).await;
+    assert_eq!(lines[0]["alts"], json!(["Shingeki no Kyojin"]));
+    let ids: Vec<&str> = lines[1]["items"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["s7", "s8"]);
+    // Enter sin elegir: el server le pregunta a AniList.
+    let lines = ndjson(&t, "/api/search?q=attack%20on%20titan&resolve=1&sources=11", &c).await;
+    assert_eq!(lines[0]["alts"], json!(["Shingeki no Kyojin", "AoT"]));
+    assert!(lines[1]["items"].as_array().unwrap().iter().any(|w| w["title"] == "Shingeki no Kyojin"));
+    // Sin otros títulos no hay línea extra.
+    let lines = ndjson(&t, "/api/search?q=Berserk&resolve=1&sources=11", &c).await;
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].get("alts").is_none());
 }

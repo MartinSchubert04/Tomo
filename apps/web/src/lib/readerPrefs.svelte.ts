@@ -18,6 +18,11 @@ export type MangaPrefs = {
   bg: PageColor;
   /** Pasar al capitulo siguiente solo al terminar (en cascada, se agrega abajo). */
   autoNext: boolean;
+  /** Cuanto baja la cascada con un paso de la rueda del mouse, en % de lo normal (100 = el del
+   *  navegador, sin tocar nada). */
+  wheelStep: number;
+  /** Cuanto baja con el teclado (espacio, AvPag, flechas), en % del alto de la pantalla. */
+  keyStep: number;
 };
 
 export type BookFont = "original" | "literata" | "inter";
@@ -45,6 +50,8 @@ export const mangaPrefs = $state<MangaPrefs>(
     gap: 0,
     bg: "black",
     autoNext: true,
+    wheelStep: 100,
+    keyStep: 90,
   }),
 );
 

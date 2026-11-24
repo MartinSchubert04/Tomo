@@ -5,7 +5,7 @@ use std::{collections::HashSet, convert::Infallible, time::Duration};
 
 use axum::{
     body::Body,
-    extract::State,
+    extract::{RawQuery, State},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -18,8 +18,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     auth::AuthUser,
     error::{ApiError, ApiResult, Json, Path, Query},
+    anilist::normalize,
     library,
     state::AppState,
+    suggest,
     suwayomi::{manga_id, MangaDetail, Source, WorkCard},
 };
 
@@ -27,6 +29,10 @@ use crate::{
 const SEARCH_PARALLEL: usize = 6;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const SEARCH_DEFAULT_MAX: usize = 12;
+/// Búsquedas por fuente como mucho (lo escrito y otros títulos de la misma obra).
+const SEARCH_VARIANTS: usize = 3;
+/// Cuánto se espera a AniList al apretar Enter sin elegir una sugerencia.
+const RESOLVE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -81,10 +87,52 @@ async fn browse(State(s): State<AppState>, _u: AuthUser, Path(id): Path<String>,
     Ok(Json(Page { items, has_next }))
 }
 
-#[derive(Deserialize)]
+/// `/api/search`: `q`, `sources=id,id`, `alt=` repetible (otros títulos de la misma obra, de
+/// `/api/suggest`) y `resolve=1` (sin `alt`, preguntarle a AniList si `q` es el nombre de una obra
+/// en otro idioma; ver `suggest::resolve`). `alt` se repite, así que no sirve `Query` (serde_urlencoded
+/// no arma listas).
+#[derive(Default)]
 struct SearchQuery {
     q: String,
     sources: Option<String>,
+    alts: Vec<String>,
+    resolve: bool,
+}
+
+fn parse_search(raw: Option<&str>) -> SearchQuery {
+    let mut out = SearchQuery::default();
+    for (k, v) in url::form_urlencoded::parse(raw.unwrap_or("").as_bytes()) {
+        match k.as_ref() {
+            "q" => out.q = v.into_owned(),
+            "sources" => out.sources = Some(v.into_owned()),
+            "alt" if out.alts.len() < 8 && !v.trim().is_empty() && v.len() <= 200 => out.alts.push(v.trim().to_string()),
+            "resolve" => out.resolve = v == "1" || v == "true",
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Las búsquedas que se le hacen a cada fuente: los otros títulos primero (romaji, inglés) y lo
+/// escrito, sin repetir, como mucho `SEARCH_VARIANTS`.
+fn search_terms(q: &str, alts: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    for t in alts.iter().map(String::as_str).chain(std::iter::once(q)) {
+        if seen.insert(normalize(t)) {
+            out.push(t.to_string());
+        }
+        if out.len() == SEARCH_VARIANTS {
+            break;
+        }
+    }
+    out
+}
+
+/// Primera línea del NDJSON cuando se buscó con otros títulos: `{"alts":[...]}`.
+#[derive(Serialize)]
+struct AltsLine<'a> {
+    alts: &'a [String],
 }
 
 #[derive(Serialize)]
@@ -112,12 +160,23 @@ fn default_sources(all: &[Source], pinned: &[String]) -> Vec<Source> {
         .collect()
 }
 
-async fn search(State(s): State<AppState>, u: AuthUser, Query(q): Query<SearchQuery>) -> ApiResult<Response> {
+async fn search(State(s): State<AppState>, u: AuthUser, RawQuery(raw): RawQuery) -> ApiResult<Response> {
+    let q = parse_search(raw.as_deref());
     let text = q.q.trim().to_string();
     if text.is_empty() {
         return Err(ApiError::bad_request("q is required"));
     }
-    let all = s.suwa.sources().await?;
+    // Las fuentes y AniList a la vez (AniList tiene 1 s; con caché, nada).
+    let (all, resolved) = tokio::join!(s.suwa.sources(), async {
+        if q.alts.is_empty() && q.resolve {
+            suggest::resolve(&s, &text, RESOLVE_TIMEOUT).await
+        } else {
+            Vec::new()
+        }
+    });
+    let all = all?;
+    let alts: Vec<String> = if q.alts.is_empty() { resolved } else { q.alts.clone() };
+    let terms = search_terms(&text, &alts);
     let chosen: Vec<Source> = match q.sources.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         Some(list) => {
             let ids: HashSet<&str> = list.split(',').map(str::trim).collect();
@@ -129,14 +188,42 @@ async fn search(State(s): State<AppState>, u: AuthUser, Query(q): Query<SearchQu
         }
     };
     let suwa = s.suwa.clone();
+    // Si se buscó con otros títulos, la UI lo muestra ("Buscado también como ...").
+    let head = (terms.len() > 1).then(|| {
+        let shown: Vec<String> = terms.iter().filter(|t| normalize(t) != normalize(&text)).cloned().collect();
+        let mut line = serde_json::to_vec(&AltsLine { alts: &shown }).unwrap_or_default();
+        line.push(b'\n');
+        Ok::<Bytes, Infallible>(Bytes::from(line))
+    });
     let lines = stream::iter(chosen)
         .map(move |src| {
-            let (suwa, text) = (suwa.clone(), text.clone());
+            let (suwa, terms) = (suwa.clone(), terms.clone());
             async move {
-                let res = tokio::time::timeout(SEARCH_TIMEOUT, suwa.browse(&src.id, "SEARCH", Some(&text), 1)).await;
+                // Cada título en paralelo; los resultados se juntan sin repetir (por id), en el
+                // orden de los títulos. Error solo si fallaron todos.
+                let each = futures_util::future::join_all(terms.iter().map(|t| suwa.browse(&src.id, "SEARCH", Some(t), 1)));
+                let res = tokio::time::timeout(SEARCH_TIMEOUT, each).await;
                 let (items, error) = match res {
-                    Ok(Ok((items, _))) => (items, None),
-                    Ok(Err(e)) => (Vec::new(), Some(e.message)),
+                    Ok(all) => {
+                        let mut items: Vec<WorkCard> = Vec::new();
+                        let mut seen = HashSet::new();
+                        let mut err = None;
+                        let mut any_ok = false;
+                        for r in all {
+                            match r {
+                                Ok((found, _)) => {
+                                    any_ok = true;
+                                    for w in found {
+                                        if seen.insert(w.id.clone()) {
+                                            items.push(w);
+                                        }
+                                    }
+                                }
+                                Err(e) => err = err.or(Some(e.message)),
+                            }
+                        }
+                        (items, if any_ok { None } else { err })
+                    }
                     Err(_) => (Vec::new(), Some("The source took too long to answer".to_string())),
                 };
                 let mut line = serde_json::to_vec(&SearchLine { source: &src, items, error }).unwrap_or_default();
@@ -145,6 +232,7 @@ async fn search(State(s): State<AppState>, u: AuthUser, Query(q): Query<SearchQu
             }
         })
         .buffer_unordered(SEARCH_PARALLEL);
+    let lines = stream::iter(head).chain(lines);
     let mut res = Response::new(Body::from_stream(lines));
     let h = res.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-ndjson"));

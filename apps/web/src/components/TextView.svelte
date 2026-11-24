@@ -14,8 +14,9 @@
     url,
     start = 0,
     onback,
+    ontitle,
     onprogress,
-  }: { book: Book; url: string; start?: number; onback: () => void; onprogress: (fraction: number) => void } = $props();
+  }: { book: Book; url: string; start?: number; onback: () => void; ontitle?: () => void; onprogress: (fraction: number) => void } = $props();
 
   let text = $state<string | null>(null);
   let error = $state("");
@@ -70,7 +71,11 @@
   {#if chrome}
     <header class="bar" transition:barTop>
       <button class="icon-btn" onclick={onback} aria-label={t("common.back")}><ArrowLeft size={20} /></button>
-      <span class="t1 ellipsis">{book.title}</span>
+      {#if ontitle}
+        <button class="t1 ellipsis link" onclick={ontitle} title={t("book.details")}>{book.title}</button>
+      {:else}
+        <span class="t1 ellipsis">{book.title}</span>
+      {/if}
       <span class="mono pct">{num(Math.round(frac * 100))} %</span>
       <button class="icon-btn" onclick={() => (settings = true)} title={t("reader.settings")}><Settings2 size={19} /></button>
     </header>
@@ -91,6 +96,8 @@
     position: absolute;
     inset: 0;
     overflow-y: auto;
+    --sb-thumb: color-mix(in srgb, var(--page-fg) 26%, transparent);
+    --sb-hover: color-mix(in srgb, var(--page-fg) 48%, transparent);
   }
   article {
     max-width: 760px;
@@ -104,7 +111,9 @@
     padding: 100px 20px;
     text-align: center;
   }
+  /* Sin zoom en el lector; las barras si se agrandan con "Tamaño de la interfaz" (lib/scale.svelte.ts). */
   .bar {
+    zoom: var(--ui-zoom, 1);
     position: absolute;
     left: 0;
     right: 0;
@@ -127,6 +136,16 @@
   .t1 {
     flex: 1;
     font-weight: 650;
+  }
+  .link {
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+  .link:hover {
+    text-decoration-color: currentColor;
   }
   .pct {
     font-size: 12.5px;

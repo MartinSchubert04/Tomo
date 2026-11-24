@@ -2,16 +2,20 @@
   // Ajustes: apariencia (idioma, tema, paleta, reducir animaciones), lectura (los valores por
   // defecto del lector en este dispositivo), fuentes (fijadas, NSFW) y la cuenta (contraseña,
   // salir). Las secciones recuerdan si estan abiertas.
-  import { BookOpenText, KeyRound, LogOut, Palette, Puzzle, UserRound } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, BookOpenText, Keyboard, KeyRound, LogOut, Palette, Puzzle, UserRound, X } from "@lucide/svelte";
+  import { chapterLangs, DEFAULT_CHAPTER_LANGS, langBadge } from "../lib/chapters";
+  import { SHORTCUTS } from "../lib/shortcuts";
   import Section from "../components/Section.svelte";
   import Seg from "../components/Seg.svelte";
+  import Select from "../components/Select.svelte";
   import Switch from "../components/Switch.svelte";
   import { api, errText } from "../lib/api";
   import { brand } from "../lib/brand";
   import { i18n, setLang, t, UI_LANGS, type Lang } from "../lib/i18n.svelte";
   import { bookPrefs, mangaPrefs, saveBookPrefs, saveMangaPrefs, type ReadDir, type ReadMode } from "../lib/readerPrefs.svelte";
   import { applyReduceMotion, logout, session, setPrefs } from "../lib/session.svelte";
-  import { isPinned, loadSources, orderedSources, sources, togglePin } from "../lib/sources.svelte";
+  import { scale, setScale, UI_SCALES, type UiScale } from "../lib/scale.svelte";
+  import { installedLangs, isPinned, loadSources, setSourceLangs, sourceLangs, sources, togglePin, visibleSources } from "../lib/sources.svelte";
   import { allPalettes, applyTheme, currentPalette, look, palettesOf, THEMES, type ThemeId } from "../lib/themes.svelte";
   import { toast } from "../lib/toast.svelte";
 
@@ -59,7 +63,48 @@
     }
   }
 
-  const pinned = $derived((sources.list ? orderedSources(sources.list) : []).filter((s) => isPinned(s.id)));
+  const pinned = $derived((sources.list ? visibleSources(sources.list, true) : []).filter((s) => isPinned(s.id)));
+
+  // Tamaño de la interfaz: "Auto (133 %)" dice cuanto da en esta pantalla.
+  const scaleOptions = $derived(
+    UI_SCALES.map((v) => ({
+      value: v,
+      label: v === "auto" ? t("settings.uiScaleAuto", { pct: Math.round(scale.factor * 100) }) : `${v} %`,
+    })),
+  );
+  const autoPct = $derived(scale.pref === "auto" ? Math.round(scale.factor * 100) : 0);
+
+  // Idiomas de las fuentes: nombre en el idioma de la interfaz ("es-419" → "español
+  // latinoamericano"); "all" son las que traen varios idiomas.
+  function langName(code: string): string {
+    if (code === "all") return t("settings.langAll");
+    try {
+      const n = new Intl.DisplayNames([i18n.lang], { type: "language" }).of(code);
+      return n ? n.charAt(0).toUpperCase() + n.slice(1) : code;
+    } catch {
+      return code;
+    }
+  }
+  const langs = $derived(sources.list ? installedLangs(sources.list) : []);
+  // Idiomas de los capitulos, en orden (el primero que tenga un numero es el que se abre).
+  const COMMON_LANGS = ["es-419", "es", "en", "pt-br", "fr", "it", "de", "ja", "ko", "zh"];
+  const chLangs = $derived(session.prefs.chapterLangs ?? DEFAULT_CHAPTER_LANGS);
+  const addable = $derived(COMMON_LANGS.filter((l) => !chLangs.includes(l)).map((l) => ({ value: l, label: langName(l) })));
+  function setChLangs(v: string[]) {
+    setPrefs({ chapterLangs: v });
+  }
+  function moveLang(i: number, d: number) {
+    const v = [...chapterLangs()];
+    const j = i + d;
+    if (j < 0 || j >= v.length) return;
+    [v[i], v[j]] = [v[j], v[i]];
+    setChLangs(v);
+  }
+
+  function toggleLang(code: string) {
+    const cur = sourceLangs();
+    setSourceLangs(cur.includes(code) ? cur.filter((x) => x !== code) : [...cur, code]);
+  }
 </script>
 
 <div class="view">
@@ -92,6 +137,11 @@
             {p.name}
           </button>
         {/each}
+      </div>
+      <div class="field narrow">
+        {t("settings.uiScale")}
+        <Select value={scale.pref} options={scaleOptions} onchange={(v: UiScale) => setScale(v)} />
+        <span class="hint">{autoPct ? t("settings.uiScaleHintAuto", { pct: autoPct }) : t("settings.uiScaleHint")}</span>
       </div>
       <Switch
         checked={!!session.prefs.reduceMotion}
@@ -130,6 +180,36 @@
         </div>
       </div>
       <Switch checked={mangaPrefs.autoNext} onchange={(v) => ((mangaPrefs.autoNext = v), saveMangaPrefs())}>{t("reader.autoNext")}</Switch>
+      <div class="sub">{t("settings.chapterLangs")}</div>
+      <div class="hint-top faint">{t("settings.chapterLangsHint")}</div>
+      <div class="langs">
+        {#each chLangs as l, i (l)}
+          <div class="lang-row">
+            <span class="badge mono">{langBadge(l)}</span>
+            <span class="grow">{langName(l)}</span>
+            <button class="icon-btn" disabled={i === 0} onclick={() => moveLang(i, -1)} title={t("settings.moveUp")} aria-label={t("settings.moveUp")}><ArrowUp size={15} /></button>
+            <button class="icon-btn" disabled={i === chLangs.length - 1} onclick={() => moveLang(i, 1)} title={t("settings.moveDown")} aria-label={t("settings.moveDown")}><ArrowDown size={15} /></button>
+            <button class="icon-btn" disabled={chLangs.length === 1} onclick={() => setChLangs(chLangs.filter((x) => x !== l))} title={t("common.delete")} aria-label={t("common.delete")}><X size={15} /></button>
+          </div>
+        {/each}
+        {#if addable.length}
+          <div class="add-lang">
+            <Select value={""} placeholder={t("settings.addLang")} options={addable} onchange={(v: string) => v && setChLangs([...chLangs, v])} />
+          </div>
+        {/if}
+      </div>
+      <div class="grid2">
+        <label class="field">
+          <span class="row">{t("reader.wheelStep")}<span class="grow"></span><span class="mono">{mangaPrefs.wheelStep} %</span></span>
+          <input type="range" min="50" max="400" step="10" bind:value={mangaPrefs.wheelStep} onchange={saveMangaPrefs} />
+          <span class="hint">{t("reader.wheelStepHint")}</span>
+        </label>
+        <label class="field">
+          <span class="row">{t("reader.keyStep")}<span class="grow"></span><span class="mono">{mangaPrefs.keyStep} %</span></span>
+          <input type="range" min="25" max="100" step="5" bind:value={mangaPrefs.keyStep} onchange={saveMangaPrefs} />
+          <span class="hint">{t("reader.keyStepHint")}</span>
+        </label>
+      </div>
       <div class="field">
         {t("settings.bookFlow")}
         <Seg
@@ -144,10 +224,22 @@
     </Section>
 
     <Section id="sources" title={t("settings.sources")} icon={Puzzle} summary={t("settings.pinnedN", { n: pinned.length })}>
+      {#if langs.length > 1}
+        <div class="sub">{t("settings.sourceLangs")}</div>
+        <div class="hint-top faint">{t("settings.sourceLangsHint")}</div>
+        <div class="srcs">
+          {#each langs as code (code)}
+            <button class="pick" class:on={sourceLangs().includes(code)} onclick={() => toggleLang(code)}>
+              {langName(code)}<span class="code">{code.toUpperCase()}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="sub">{t("settings.pinned")}</div>
+      {/if}
       <div class="hint-top faint">{t("settings.sourcesHint")}</div>
       {#if sources.list?.length}
         <div class="srcs">
-          {#each orderedSources(sources.list) as s (s.id)}
+          {#each visibleSources(sources.list) as s (s.id)}
             <button class="pick" class:on={isPinned(s.id)} onclick={() => togglePin(s.id)}>
               <img src={s.icon} alt="" loading="lazy" />{s.name}
             </button>
@@ -157,6 +249,20 @@
         <div class="faint">{t("home.noSources")}</div>
       {/if}
       <Switch checked={!!session.prefs.nsfw} onchange={(v) => setPrefs({ nsfw: v })}>{t("settings.nsfw")}</Switch>
+    </Section>
+
+    <Section id="keys" title={t("keys.title")} icon={Keyboard} summary="/ · G H · R">
+      {#each SHORTCUTS as g (g.title)}
+        <div class="sub">{t(g.title)}</div>
+        <div class="keys">
+          {#each g.items as k (k.label)}
+            <div class="key-row">
+              <span class="grow">{t(k.label)}</span>
+              <span class="kbds">{#each k.keys as kk (kk)}<kbd>{kk}</kbd>{/each}</span>
+            </div>
+          {/each}
+        </div>
+      {/each}
     </Section>
 
     <Section id="account" title={t("settings.account")} icon={UserRound} summary={session.user?.name ?? ""}>
@@ -180,6 +286,12 @@
     flex-direction: column;
     gap: 10px;
     max-width: 980px;
+    margin-inline: auto;
+  }
+  .page-head,
+  .about {
+    max-width: 980px;
+    margin-inline: auto;
   }
   .sub {
     display: flex;
@@ -290,6 +402,59 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+  .langs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 460px;
+  }
+  .lang-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 4px 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--panel-2);
+    border: var(--border) solid var(--line);
+  }
+  .lang-row .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .badge {
+    min-width: 34px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .add-lang {
+    margin-top: 4px;
+  }
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 2px 24px;
+  }
+  .key-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 34px;
+    border-bottom: var(--border) solid var(--line);
+  }
+  .kbds {
+    display: inline-flex;
+    gap: 4px;
+  }
+  .narrow {
+    max-width: 320px;
+  }
+  .code {
+    font-size: 10.5px;
+    font-weight: 700;
+    opacity: 0.55;
   }
   .srcs img {
     width: 18px;

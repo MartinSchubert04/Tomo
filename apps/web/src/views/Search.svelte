@@ -1,52 +1,48 @@
 <script lang="ts">
-  // Busqueda global. Primero lo propio al instante (biblioteca y libros subidos), despues una fila
-  // por fuente a medida que contestan (el server las manda por NDJSON). Se busca al apretar Enter
-  // o 700 ms despues de dejar de escribir.
-  import { LoaderCircle, RefreshCw, Search, X } from "@lucide/svelte";
+  // Busqueda global (#/search?q=...&alt=...). Se escribe en la barra de arriba (SearchBar); aca
+  // los resultados: primero lo propio al instante (biblioteca y libros subidos), despues una fila
+  // por fuente a medida que contestan (NDJSON). Con `alt` (una sugerencia de AniList) cada fuente
+  // busca tambien esos titulos; sin `alt`, el server le pregunta a AniList si lo escrito es el
+  // nombre de una obra en otro idioma ("attack on titan" → "Shingeki no Kyojin").
+  import { LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
   import { flip } from "svelte/animate";
   import CoverCard from "../components/CoverCard.svelte";
   import Row from "../components/Row.svelte";
   import { api, errText, searchAll } from "../lib/api";
   import { t } from "../lib/i18n.svelte";
   import { flipMs, rise } from "../lib/motion";
-  import { route, setQuery } from "../lib/router.svelte";
+  import { go, route } from "../lib/router.svelte";
+  import { loadSources, searchSources } from "../lib/sources.svelte";
   import type { Book, LibraryEntry, SearchGroup, WorkCard } from "../lib/types";
 
-  let typed = $state(route.query.get("q") ?? "");
-  let q = $state(route.query.get("q") ?? "");
+  let q = $state("");
+  let alsoAs = $state<string[]>([]);
   let groups = $state<SearchGroup[]>([]);
   let searching = $state(false);
   let error = $state("");
-  let input = $state<HTMLInputElement>();
   let library = $state<LibraryEntry[]>([]);
   let books = $state<Book[]>([]);
   let ctrl: AbortController | null = null;
-  let timer = 0;
 
   api.library().then((l) => (library = l)).catch(() => {});
   api.books().then((b) => (books = b)).catch(() => {});
 
-  $effect(() => {
-    if (!matchMedia("(pointer: coarse)").matches || !q) input?.focus();
-  });
-
   const norm = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
   const mine = $derived.by(() => {
-    const n = norm(q.trim());
-    if (n.length < 2) return [];
+    const terms = [q, ...alsoAs].map((x) => norm(x.trim())).filter((x) => x.length >= 2);
+    if (!terms.length) return [];
+    const hit = (s: string) => terms.some((n) => norm(s).includes(n));
     const out: WorkCard[] = [];
     const seen = new Set<string>();
-    for (const e of library) if (norm(e.work.title).includes(n) && !seen.has(e.work.id)) (seen.add(e.work.id), out.push(e.work));
-    for (const b of books)
-      if ((norm(b.title).includes(n) || norm(b.author ?? "").includes(n)) && !seen.has(b.id)) (seen.add(b.id), out.push(b));
+    for (const e of library) if (hit(e.work.title) && !seen.has(e.work.id)) (seen.add(e.work.id), out.push(e.work));
+    for (const b of books) if ((hit(b.title) || hit(b.author ?? "")) && !seen.has(b.id)) (seen.add(b.id), out.push(b));
     return out;
   });
 
-  async function run(term: string) {
+  async function run(term: string, alts: string[]) {
     ctrl?.abort();
-    clearTimeout(timer);
     q = term.trim();
-    setQuery({ q });
+    alsoAs = alts;
     groups = [];
     error = "";
     if (q.length < 2) {
@@ -56,6 +52,11 @@
     const c = (ctrl = new AbortController());
     searching = true;
     try {
+      // Las fijadas o las de los idiomas del usuario (sin la lista de fuentes, decide el server).
+      const ids = await loadSources()
+        .then((l) => searchSources(l))
+        .catch(() => undefined);
+      if (c.signal.aborted) return;
       await searchAll(
         q,
         (g) => {
@@ -65,6 +66,7 @@
           groups = [...groups, g].sort((a, b) => score(a) - score(b));
         },
         c.signal,
+        { sources: ids?.length ? ids : undefined, alts, resolve: true, onAlts: (a) => !c.signal.aborted && (alsoAs = a) },
       );
     } catch (e) {
       if ((e as Error).name !== "AbortError") error = errText(e);
@@ -73,24 +75,21 @@
     }
   }
 
-  // Al abrir con ?q= (atras desde un manga) se busca de nuevo.
-  const initial = route.query.get("q") ?? "";
-  if (initial) run(initial);
-
-  function onInput() {
-    clearTimeout(timer);
-    timer = window.setTimeout(() => run(typed), 700);
-  }
+  // Cada cambio de la URL (la barra de arriba navega aca) busca de nuevo.
+  let lastKey = "";
+  $effect(() => {
+    const term = route.query.get("q") ?? "";
+    const alts = route.query.getAll("alt");
+    const key = JSON.stringify([term, alts]);
+    if (key === lastKey) return;
+    lastKey = key;
+    run(term, alts);
+  });
 
   async function retry(g: SearchGroup) {
     const c = new AbortController();
     groups = groups.map((x) => (x.source.id === g.source.id ? { ...x, error: undefined, items: [] } : x));
-    await searchAll(
-      q,
-      (ng) => (groups = groups.map((x) => (x.source.id === ng.source.id ? ng : x))),
-      c.signal,
-      [g.source.id],
-    ).catch(() => {});
+    await searchAll(q, (ng) => (groups = groups.map((x) => (x.source.id === ng.source.id ? ng : x))), c.signal, { sources: [g.source.id], alts: alsoAs }).catch(() => {});
   }
 
   const found = $derived(groups.filter((g) => g.items.length));
@@ -98,40 +97,18 @@
 </script>
 
 <div class="view">
-  <form
-    class="inbox big"
-    onsubmit={(e) => {
-      e.preventDefault();
-      run(typed);
-      input?.blur();
-    }}
-  >
-    <Search size={18} />
-    <input
-      class="search-input"
-      bind:this={input}
-      bind:value={typed}
-      oninput={onInput}
-      placeholder={t("search.placeholder")}
-      enterkeyhint="search"
-      autocomplete="off"
-      spellcheck="false"
-    />
-    {#if searching}<LoaderCircle size={16} class="spin" />{/if}
-    {#if typed}
-      <button
-        type="button"
-        class="icon-btn"
-        aria-label={t("common.clear")}
-        onclick={() => {
-          typed = "";
-          run("");
-          input?.focus();
-        }}><X size={16} /></button
-      >
+  {#if q}
+    <div class="page-head">
+      <h1 class="ellipsis">{t("search.resultsFor", { q })}</h1>
+      {#if searching}<LoaderCircle size={18} class="spin faint" />{/if}
+    </div>
+    {#if alsoAs.length}
+      <div class="also">
+        <span class="faint">{t("search.alsoAs")}:</span>
+        {#each alsoAs as a (a)}<button class="chip" onclick={() => go(`/search?q=${encodeURIComponent(a)}`)} title={t("search.onlyThis")}>{a}</button>{/each}
+      </div>
     {/if}
-  </form>
-
+  {/if}
   {#if !q}
     <div class="empty hint">
       <Search size={30} />
@@ -184,16 +161,16 @@
 </div>
 
 <style>
-  .big {
-    height: 48px;
-    border-radius: 999px;
-    padding: 0 16px;
-    margin-bottom: 22px;
-    max-width: 720px;
+  .also {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: -6px 0 18px;
+    font-size: 13px;
   }
-  .big input {
-    height: 46px;
-    font-size: 16px;
+  .also .chip {
+    cursor: pointer;
   }
   .group-host {
     margin: 0 calc(-1 * var(--gutter));

@@ -107,7 +107,18 @@ CREATE TABLE books (
     pages       INTEGER,
     cover_ext   TEXT
 );
-"#];
+"#,
+    // 2: cuándo se vio cada capítulo por primera vez (0 = ya estaba en la primera lectura de la
+    // fuente; así "capítulos nuevos" no cuenta todo un manga recién agregado), y el idioma y el
+    // scan de cada uno (un mismo número puede venir en varios idiomas o de varios scans: se
+    // cuentan por número y el siguiente capítulo sigue con el mismo idioma y scan).
+    r#"
+ALTER TABLE chapters ADD COLUMN found_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chapters ADD COLUMN lang TEXT;
+ALTER TABLE chapters ADD COLUMN scanlator TEXT;
+CREATE INDEX chapters_number ON chapters(work_id, number);
+"#,
+];
 
 #[derive(Clone)]
 pub struct Db {

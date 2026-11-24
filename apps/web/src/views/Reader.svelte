@@ -6,6 +6,7 @@
   import { onDestroy } from "svelte";
   import ReaderShell, { type PickItem } from "../components/ReaderShell.svelte";
   import { api, errText } from "../lib/api";
+  import { groupChapters, groupDone, groupOf, langBadge, pickVariant, preferredScan, setPreferredScan } from "../lib/chapters";
   import { chapterShort, chapterTitle } from "../lib/format";
   import { ago, t } from "../lib/i18n.svelte";
   import type { Segment } from "../lib/pages";
@@ -25,19 +26,29 @@
   let loadingNext = $state(false);
 
   const chapters = $derived(manga?.chapters ?? []);
+  // Por numero (lib/chapters.ts): anterior y siguiente siguen los numeros y eligen la version
+  // con el mismo idioma y scan que se esta leyendo, si ese numero la tiene.
+  const groups = $derived(groupChapters(chapters));
   const curId = $derived(segments[cur]?.id ?? route.params[1] ?? "");
-  const idx = $derived(chapters.findIndex((c) => c.id === curId));
+  const gi = $derived(groupOf(groups, curId));
+  const curCh = $derived(gi >= 0 ? groups[gi].variants.find((v) => v.id === curId) : undefined);
+  const ctx = $derived({ lang: curCh?.lang ?? null, scan: curCh?.scanlator ?? null, preferScan: preferredScan(workId) });
   // La lista viene del mas nuevo al mas viejo: el siguiente es el de antes en la lista.
-  const nextCh = $derived<Chapter | null>(idx > 0 ? chapters[idx - 1] : null);
-  const prevCh = $derived<Chapter | null>(idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null);
+  const nextCh = $derived<Chapter | null>(gi > 0 ? pickVariant(groups[gi - 1], ctx) : null);
+  const prevCh = $derived<Chapter | null>(gi >= 0 && gi < groups.length - 1 ? pickVariant(groups[gi + 1], ctx) : null);
 
   const pickItems = $derived<PickItem[]>(
-    chapters.map((c) => ({
-      id: c.id,
-      label: chapterShort(c) + (chapterTitle(c) ? ` · ${chapterTitle(c)}` : ""),
-      sub: [c.scanlator, c.date ? ago(c.date) : ""].filter(Boolean).join(" · "),
-      done: !!progress.chapters[c.id]?.done,
-    })),
+    groups.map((g) => {
+      const c = g.variants.find((v) => v.id === curId) ?? pickVariant(g, ctx);
+      return {
+        id: c.id,
+        label: chapterShort(c) + (chapterTitle(c) ? ` · ${chapterTitle(c)}` : ""),
+        sub: [g.variants.length > 1 ? `${langBadge(c.lang)} +${g.variants.length - 1}` : langBadge(c.lang), c.scanlator, c.date ? ago(c.date) : ""]
+          .filter(Boolean)
+          .join(" · "),
+        done: groupDone(g, progress.chapters),
+      };
+    }),
   );
 
   async function segmentFor(c: Chapter): Promise<Segment> {
@@ -49,7 +60,9 @@
   async function openChapter(chapterId: string, page: number | null) {
     error = "";
     flush();
-    const c = chapters.find((x) => x.id === chapterId) ?? ({ id: chapterId, name: "", number: -1, scanlator: null, date: 0 } as Chapter);
+    const c = chapters.find((x) => x.id === chapterId) ?? ({ id: chapterId, name: "", number: -1, scanlator: null, lang: null, date: 0 } as Chapter);
+    // El scan que se esta leyendo queda como el preferido de este manga.
+    if (c.scanlator) setPreferredScan(workId, c.scanlator);
     try {
       const s = await segmentFor(c);
       const saved = progress.chapters[chapterId];
@@ -118,8 +131,9 @@
   async function onnearend() {
     if (!mangaPrefs.autoNext || loadingNext) return;
     const lastId = segments[segments.length - 1]?.id;
-    const i = chapters.findIndex((c) => c.id === lastId);
-    const n = i > 0 ? chapters[i - 1] : null;
+    const i = groupOf(groups, lastId ?? "");
+    const last = i >= 0 ? groups[i].variants.find((v) => v.id === lastId) : undefined;
+    const n = i > 0 ? pickVariant(groups[i - 1], { lang: last?.lang ?? null, scan: last?.scanlator ?? null, preferScan: preferredScan(workId) }) : null;
     if (!n || segments.some((s) => s.id === n.id)) return;
     loadingNext = true;
     try {
@@ -165,6 +179,7 @@
       {segments}
       {start}
       onback={() => back(`/manga/${workId}`)}
+      ontitle={() => go(`/manga/${workId}`)}
       {onposition}
       {onnearend}
       hasPrev={!!prevCh}

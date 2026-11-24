@@ -68,7 +68,7 @@
   }
   .dialog {
     pointer-events: auto;
-    width: min(440px, calc(100vw - 32px));
+    width: min(440px, calc(var(--vw) - 32px));
     padding: 20px;
     background: var(--sidebar);
     box-shadow: var(--pop-shadow);

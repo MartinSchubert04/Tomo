@@ -2,7 +2,7 @@
   // Explorar una fuente: pastillas con las fuentes (las fijadas primero), Populares / Ultimos y
   // buscar dentro de la fuente. Grilla con scroll infinito. La fuente y el modo viven en la URL
   // (#/explore/{sourceId}?type=latest&q=...), asi "atras" vuelve igual.
-  import { PackagePlus, Pin, PinOff, RefreshCw, Search, X } from "@lucide/svelte";
+  import { Languages, PackagePlus, Pin, PinOff, RefreshCw, Search, X } from "@lucide/svelte";
   import { untrack } from "svelte";
   import CoverCard from "../components/CoverCard.svelte";
   import CoverGrid from "../components/CoverGrid.svelte";
@@ -11,14 +11,25 @@
   import { t } from "../lib/i18n.svelte";
   import { go, route, setQuery } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
-  import { isPinned, langLabel, loadSources, orderedSources, sources, togglePin } from "../lib/sources.svelte";
+  import { isPinned, langLabel, loadSources, orderedSources, sources, togglePin, visibleSources } from "../lib/sources.svelte";
   import type { BrowseType, Source, WorkCard } from "../lib/types";
 
   loadSources().catch(() => {});
 
-  const list = $derived(sources.list ? orderedSources(sources.list) : null);
+  // Las pastillas: las de los idiomas del usuario (Ajustes → Fuentes) y las fijadas; "+N en otros
+  // idiomas" muestra el resto. La fuente de la URL vale aunque sea de otro idioma.
+  let allLangs = $state(false);
+  const every = $derived(sources.list ? orderedSources(sources.list) : null);
+  const mine = $derived(sources.list ? visibleSources(sources.list) : null);
+  const hidden = $derived((every?.length ?? 0) - (mine?.length ?? 0));
   const sourceId = $derived(route.params[0] ?? "");
-  const source = $derived<Source | null>(list?.find((s) => s.id === sourceId) ?? list?.[0] ?? null);
+  const source = $derived<Source | null>(every?.find((s) => s.id === sourceId) ?? mine?.[0] ?? every?.[0] ?? null);
+  const list = $derived.by(() => {
+    if (!every || !mine) return null;
+    const l = allLangs ? every : mine;
+    // La elegida siempre se ve (aunque sea de otro idioma).
+    return source && !l.some((s) => s.id === source.id) ? [source, ...l] : l;
+  });
   const q = $derived(route.query.get("q") ?? "");
   const type = $derived<BrowseType>(q ? "search" : route.query.get("type") === "latest" ? "latest" : "popular");
 
@@ -92,7 +103,7 @@
     {/if}
   </div>
 
-  {#if list && !list.length}
+  {#if every && !every.length}
     <div class="empty">
       <PackagePlus size={30} />
       <h3>{t("home.noSources")}</h3>
@@ -114,6 +125,12 @@
             {#if s.nsfw !== "safe"}<span class="dot" title={t("explore.nsfw")}></span>{/if}
           </button>
         {/each}
+        {#if hidden > 0}
+          <button class="pick more-langs" onclick={() => (allLangs = !allLangs)} title={t("explore.langsHint")}>
+            <Languages size={14} />
+            <span>{allLangs ? t("explore.myLangs") : t("explore.allLangs", { n: hidden })}</span>
+          </button>
+        {/if}
       {:else}
         {#each Array(6) as _, i (i)}<span class="skel chip-skel"></span>{/each}
       {/if}
@@ -178,6 +195,10 @@
     height: 18px;
     border-radius: 5px;
     object-fit: cover;
+  }
+  .more-langs {
+    color: var(--text-3);
+    border-style: dashed;
   }
   .lang {
     font-size: 10.5px;

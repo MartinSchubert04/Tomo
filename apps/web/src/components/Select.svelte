@@ -4,6 +4,7 @@
   // muchas opciones aparece un buscador.
   import { Check, ChevronDown, Search } from "@lucide/svelte";
   import { tick } from "svelte";
+  import { zf } from "../lib/scale.svelte";
   import { t } from "../lib/i18n.svelte";
   import { pop } from "../lib/motion";
 
@@ -55,10 +56,12 @@
 
   async function show() {
     if (disabled) return;
+    // El rect viene en px de la ventana y style va en px CSS: con zoom se divide (lib/scale.svelte.ts).
+    const z = zf();
     const r = trigger.getBoundingClientRect();
-    const height = Math.min(300, options.length * 36 + (searchable ? 48 : 0) + 12);
+    const height = Math.min(300, options.length * 36 + (searchable ? 48 : 0) + 12) * z;
     const up = r.bottom + height + 8 > window.innerHeight && r.top > height + 8;
-    pos = { left: r.left, top: up ? r.top - 6 : r.bottom + 6, width: Math.max(r.width, ghost ? 220 : 0), up };
+    pos = { left: r.left / z, top: (up ? r.top - 6 : r.bottom + 6) / z, width: Math.max(r.width / z, ghost ? 220 : 0), up };
     query = "";
     active = Math.max(0, options.findIndex((o) => o.value === value));
     open = true;

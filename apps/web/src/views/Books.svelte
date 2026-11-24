@@ -7,6 +7,7 @@
   import CoverGrid from "../components/CoverGrid.svelte";
   import Drawer from "../components/Drawer.svelte";
   import PopMenu, { type PopItem } from "../components/PopMenu.svelte";
+  import { route, setQuery } from "../lib/router.svelte";
   import { api, errText, uploadBooks } from "../lib/api";
   import { ask } from "../lib/confirm.svelte";
   import { bytes } from "../lib/format";
@@ -35,6 +36,18 @@
   let nextId = 1;
 
   api.books().then((b) => (books = b)).catch((e) => ((books = []), toast(errText(e), true)));
+  // #/books?edit=b12 (desde el titulo de un lector): el editor de ese libro abierto.
+  $effect(() => {
+    const want = route.query.get("edit");
+    if (!want || !books) return;
+    const b = books.find((x) => x.id === want || x.id === `b${want}`);
+    setQuery({});
+    if (b && (session.user?.admin || session.user?.name === b.uploader)) {
+      editing = b;
+      editTitle = b.title;
+      editAuthor = b.author ?? "";
+    }
+  });
   api
     .history(200)
     .then((h) => (progress = Object.fromEntries(h.filter((e) => e.work.kind === "book").map((e) => [e.work.id, e.progress.fraction]))))

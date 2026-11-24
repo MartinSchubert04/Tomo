@@ -73,16 +73,36 @@ Exceptions as in Mythos: Athanor (PxPlus IBM VGA 8x16 at 16 px, titles in Jacqua
   loads its data when it nears the screen, skeletons meanwhile.
 - **Continue card** (`ContinueCard`): landscape card with the cover blurred as background, the cover
   small on the left, title, "Cap. 12 · pág. 8/40" or "45 %", progress bar. Tap = straight into the
-  reader at that spot.
+  reader at that spot; tap the title = the manga page (or the book's details). The long-press /
+  right-click menu also has "Ir a la ficha".
+- **Search bar** (`SearchBar`): the hero of the app, centered at the top of the content (560 px,
+  widens to 680 px on hover or focus; only its width animates). `/` or `Ctrl K` focuses it. Typing
+  opens a typeahead panel below it (restrained glass: `--float` at 86 % with a 22 px blur, no blur
+  in lite mode; grows from 97 %, < 200 ms): first row "Buscar «…» en todas las fuentes" (Enter),
+  then suggestions from `/api/suggest` (200 ms debounce, abortable, cached per text): thumbnail,
+  title with the matched part in the accent, and "format · year · También: other titles". Known
+  works open their page; AniList titles (✦) search every source with all their names
+  (`#/search?q=&alt=`). ↑/↓, Enter, Esc. On the phone the search button opens the same bar full
+  screen. The Search view shows "Buscado también como: …" chips when other titles were used.
 - **Source chip** (`SourceChip`): icon + name + lang; NSFW sources show a `--warn` dot.
-- **Chapter list** (`ChapterList`): rows of 52 px with number/name, scan group and relative date;
-  read ones dimmed with a check, the current one with a progress ring. Windowed (only rows near the
-  viewport are rendered: lists reach 1500 chapters). Sort ↑/↓, filter by scan group, "mark
-  previous as read" from the row menu, select mode for bulk read/unread.
-- **Manga detail** (`views/Manga.svelte`): blurred cover as a backdrop fading into `--bg`; cover,
-  title, author, status chip, genres as chips, description clamped to 4 lines ("Más"), primary
-  button "Leer" / "Seguir en el cap. N", library button with status menu, heart for favorite,
-  "Abrir en el sitio" link. On the phone the cover goes above, centered.
+- **Chapter list** (`ChapterList`): **one row per chapter number** (multi-language sources and
+  several scan groups repeat numbers; `lib/chapters.ts`). Rows of 56 px with number/name, scan
+  group and relative date of the default version; read numbers dimmed with a check (any version
+  read counts), the current one with a progress ring. When the manga has languages or repeated
+  numbers, a language badge on the left ("LAT", "EN", with an accent count dot when there are
+  more versions) opens a menu to pick a specific version (language · scan · date). Default
+  version: the language/scan being read, then the user's chapter languages in order (Settings →
+  Lectura), then the preferred scan of that manga ("Preferir scan" select, also set by the last
+  one read), then the newest. Windowed (lists reach 1500 chapters). Sort ↑/↓, "mark previous as
+  read" from the row menu, select mode for bulk read/unread.
+- **Manga detail** (`views/Manga.svelte`): blurred cover as a backdrop fading into `--bg`; cover
+  (tap = full-size view), title, author (tap = search by author; hidden when unknown), status chip
+  (hidden when unknown), source chip (tap = Explore that source), genres as chips (tap = search
+  that genre in the source), description clamped to 4 lines ("Más"), primary button "Leer" /
+  "Seguir en el cap. N" (`R`), library button with status menu, heart for favorite, "Abrir en el
+  sitio" link. On wide screens (≥ 1400 px of usable width, a container query) two columns: the
+  info sticky on the left, the chapter list filling the right. On the phone the cover goes above,
+  centered.
 - **Manga reader** (`views/Reader.svelte`): see "Reader".
 - **Book reader** (`views/BookReader.svelte`): foliate-js `<foliate-view>` for EPUB, MOBI, AZW3, FB2;
   pdf.js for PDF (pages as canvases in the same cascade/paged engine as manga); CBZ uses the manga
@@ -104,9 +124,16 @@ The page is the protagonist: black (or the chosen page color) edge to edge, chro
   (one page, swipe or tap sides), *Doble* (two pages side by side on wide screens). Direction for
   paged: right-to-left (manga) or left-to-right. Fit: width, height, original. In cascade: max
   width (600 to 1400 px, default 900) and gap between pages (0 / 8 / 24 px).
-- **Chrome** (`--media-*`): top bar (back, manga title, chapter name, chapter picker, settings)
-  and bottom bar (prev chapter, page slider with "12 / 40", next chapter). Shown on tap in the
-  center third or when scrolling up; hidden while scrolling down and after 3 s idle.
+- **Chrome** (`--media-*`): top bar (back, manga title — tap = the manga page —, chapter name —
+  tap = the chapter picker —, chapter picker, settings) and bottom bar (prev chapter, page slider
+  with "12 / 40", next chapter). Shown on tap in the center third or when scrolling up; hidden
+  while scrolling down and after 3 s idle. Previous/next follow chapter numbers and keep the
+  language and scan being read when that number has them.
+- **Scrolling** (cascade): "Desplazamiento de la rueda" (50–400 % of a normal wheel step; 100 % =
+  the browser's own) and "Desplazamiento con teclado" (↓/↑, Space, PgDn as % of the screen height,
+  default 90 %), in the reading settings sheet and Settings → Lectura. A small animator eases
+  `scrollTop` to a target that successive steps add to; touchpad events are scaled and applied
+  directly; Ctrl + wheel is left alone; reduce motion jumps.
 - **Tap zones** (paged): left third / right third turn pages (mirrored for RTL), center toggles the
   chrome. Keyboard: ←/→, A/D, space, PgUp/PgDn, Home/End, `[`/`]` previous/next chapter, F
   fullscreen, M mode, Esc back.
@@ -141,6 +168,19 @@ The content scrolls in its own container and remembers where it was when coming 
 search. Touch targets ≥ 44 px. Installable PWA (standalone, theme color from `brand.json`).
 
 Readers take the whole screen (no sidebar, no tab bar).
+
+**Interface size** (`lib/scale.svelte.ts`, Settings → Apariencia "Tamaño de la interfaz": Auto /
+90–160 %, per device). Auto: 100 % below 1800 px of window width, 115 % from 1800, 133 % from 2300
+(a 2K monitor at 100 % scaling), always 100 % on phones. Done with CSS `zoom` on `<html>`, applied
+before the first paint by `index.html`. Rules that keep it working: viewport units only through
+`--vh` / `--vw` (already divided by `--zoom`); positions computed from rects or the mouse go
+through `toCss()` / `zf()`; layouts that depend on the usable width use container queries on
+`.content` (`page`), not media queries (those measure the real window). Readers run at zoom 1
+(the page uses the real screen) and only their bars and sheets get `zoom: var(--ui-zoom)`.
+
+**Centering.** Every page's content lives in `.view`, capped at `--page-max` (1760 px) and
+centered; narrow pages (Settings) center their own column. Nothing hugs one edge with a void on
+the other at 1920 or 2560.
 
 Hash routes: `#/`, `#/explore`, `#/explore/{sourceId}?type=&q=`, `#/search?q=`, `#/library`,
 `#/books`, `#/history`, `#/manga/{workId}`, `#/read/{workId}/{chapterId}?page=`,
@@ -179,6 +219,10 @@ things use `--pop-shadow`. Reader chrome uses dark glass.
 - Do: reserve image sizes (`aspect-ratio`) so nothing jumps.
 - Do: states with color and text at once ("NSFW" chip in `--warn`, "Instalada" in `--ok`).
 - Do: every action reachable with a finger on a 390 px screen.
+- Do: everything that looks clickable is (titles, chips, covers, source names, authors) and has a
+  tooltip; nothing that isn't clickable looks like it.
+- Do: the app works over plain http in the tailnet (not a secure context): no hard dependency on
+  `crypto.subtle`, the clipboard API or service workers.
 - Don't: hardcoded colors or visible strings in components.
 - Don't: animate layout properties, blur in animations, or long animations (> 400 ms) except the
   view transition.
@@ -186,11 +230,18 @@ things use `--pop-shadow`. Reader chrome uses dark glass.
 ## 8. Responsive behavior
 
 Breakpoint 760 px (sidebar ↔ tab bar). Cover grid `repeat(auto-fill, minmax(120px, 1fr))` on the
-phone, `minmax(150px, 1fr)` on desktop. Detail: two columns ≥ 900 px. Reader: cascade max width
-from the settings; paged fits the viewport; double page only ≥ 1000 px wide and landscape.
+phone, `minmax(150px, 1fr)` on desktop. Detail: cover beside the info from 760 px; info and
+chapters side by side from 1400 px of usable width. Reader: cascade max width from the settings;
+paged fits the viewport; double page only ≥ 1000 px wide and landscape.
+
+**Scrollbars**: thin, rounded, theme-colored (`--sb-thumb`, `--sb-hover`, `--sb-active` in
+`base.css`), 5 px that grow to 8 px on hover; square and solid in Athanor; in readers they take the
+page's color so they show on black and on white pages; hidden on touch screens.
 
 ## 9. Agent guide
 
-Before changing the interface: read this file and `styles/themes.css`. Try it in at least Default,
-Poolsuite (light, 2 px borders) and Athanor (bitmap font), at 1440 px and 390 px.
+Before changing the interface: read this file and `styles/themes.css`. Try it in at least Neovim
+(the default), Poolsuite (light, 2 px borders) and Athanor (bitmap font), at 2560, 1440 and 390 px
+(2560 runs at 133 %: check menus, dropdowns, tooltips and drawers land where they should).
+Keyboard shortcuts live in `lib/shortcuts.ts` (listed in Settings → Atajos de teclado).
 `npm run check` with no warnings.

@@ -1,6 +1,7 @@
 <script lang="ts">
   // "Seguir leyendo": tarjeta apaisada con la portada desenfocada de fondo, la portada chica a la
-  // izquierda, el titulo, donde quedo y la barra de progreso. Tocarla abre el lector ahi mismo.
+  // izquierda, el titulo, donde quedo y la barra de progreso. Tocarla abre el lector ahi mismo;
+  // tocar el titulo va a la ficha (o a los datos del libro).
   import { BookOpen } from "@lucide/svelte";
   import Img from "./Img.svelte";
   import { progressLabel } from "../lib/format";
@@ -23,6 +24,7 @@
   const label = $derived(
     entry.work.kind === "manga" && p.done && entry.nextChapter ? t("home.nextChapter") : progressLabel(p, entry.chapterName, entry.work.kind),
   );
+  const detail = $derived(entry.work.kind === "book" ? `/books?edit=${encodeURIComponent(entry.work.id)}` : `/manga/${entry.work.id}`);
   const frac = $derived(entry.work.kind === "book" ? p.fraction : p.done ? 1 : p.fraction);
 </script>
 
@@ -40,7 +42,16 @@
   <span class="bg" aria-hidden="true">{#if entry.work.cover}<img src={entry.work.cover} alt="" loading="lazy" />{/if}</span>
   <span class="cover"><Img src={entry.work.cover} fallback={entry.work.title} /></span>
   <span class="info">
-    <span class="title">{entry.work.title}</span>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (el teclado abre el lector con la tarjeta; la ficha tambien esta en el menu) -->
+    <span
+      class="title"
+      title={entry.work.kind === "book" ? t("book.details") : t("reader.toDetail")}
+      onclick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        go(detail);
+      }}>{entry.work.title}</span
+    >
     <span class="where ellipsis">{label}</span>
     <span class="when">{ago(p.updatedAt)}</span>
     <span class="progress"><span class="progress-fill" style="width: {Math.round(frac * 100)}%"></span></span>
@@ -118,6 +129,12 @@
     padding: 2px 0;
   }
   .title {
+    align-self: flex-start;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
     font-weight: 650;
     font-size: 14px;
     line-height: 1.25;
@@ -126,6 +143,9 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  .title:hover {
+    text-decoration-color: currentColor;
   }
   .where {
     font-size: 12.5px;

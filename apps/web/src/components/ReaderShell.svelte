@@ -17,6 +17,7 @@
   // cerca (≈3 adelante). Teclado: ←/→, A/D, espacio, RePag/AvPag, Inicio/Fin, [ ], F, M, Esc.
   import {
     ArrowLeft,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     List,
@@ -33,12 +34,13 @@
   import Seg from "./Seg.svelte";
   import Switch from "./Switch.svelte";
   import { t } from "../lib/i18n.svelte";
-  import { barBottom, barTop, ms } from "../lib/motion";
+  import { barBottom, barTop, ms, reduceMotion } from "../lib/motion";
   import { DEFAULT_RATIO, type PageItem, type Segment } from "../lib/pages";
   import { mangaPrefs, PAGE_COLORS, saveMangaPrefs, type Fit, type PageColor, type ReadDir, type ReadMode } from "../lib/readerPrefs.svelte";
 
   let {
     title,
+    ontitle,
     segments,
     start = { seg: 0, page: 0 },
     onback,
@@ -57,6 +59,8 @@
     ltr = false,
   }: {
     title: string;
+    /** Tocar el titulo (manga: a la ficha; libro: a sus datos). */
+    ontitle?: () => void;
     segments: Segment[];
     start?: { seg: number; page: number };
     onback: () => void;
@@ -194,6 +198,64 @@
     return { destroy: () => (nearIO?.unobserve(el), midIO?.unobserve(el)) };
   }
 
+  // ---------- rueda y teclado en cascada ----------
+  // Desplazamiento propio (Ajustes de lectura → "Desplazamiento de la rueda" / "con teclado"): un
+  // animador que va acercando scrollTop a un objetivo. Los pasos seguidos suman al objetivo (con
+  // scrollBy smooth cada paso nuevo cortaba al anterior y se perdia distancia).
+  let glideTo: number | null = null;
+  let glideRaf = 0;
+  let glideSet = -1;
+  function glide(dy: number, instant = false) {
+    const el = scroller;
+    if (!el) return;
+    touched();
+    const max = el.scrollHeight - el.clientHeight;
+    // Si el usuario movio la pagina por otro lado (barra, dedo), se arranca desde donde esta.
+    const from = glideTo !== null && Math.abs(el.scrollTop - glideSet) < 3 ? glideTo : el.scrollTop;
+    glideTo = Math.max(0, Math.min(max, from + dy));
+    if (instant || reduceMotion()) {
+      el.scrollTop = glideTo;
+      glideTo = null;
+      return;
+    }
+    if (!glideRaf) glideRaf = requestAnimationFrame(glideStep);
+  }
+  function glideStep() {
+    glideRaf = 0;
+    const el = scroller;
+    if (!el || glideTo === null) return;
+    // Lo movio otro (arrastrar la barra, el dedo): se suelta.
+    if (glideSet >= 0 && Math.abs(el.scrollTop - glideSet) > 3) return void (glideTo = null, (glideSet = -1));
+    const d = glideTo - el.scrollTop;
+    if (Math.abs(d) < 1) {
+      el.scrollTop = glideTo;
+      glideTo = null;
+      glideSet = -1;
+      return;
+    }
+    // Se acerca un 22 % por cuadro (frena al llegar), al menos 1 px.
+    el.scrollTop += Math.sign(d) * Math.max(1, Math.abs(d) * 0.22);
+    glideSet = el.scrollTop;
+    touched();
+    glideRaf = requestAnimationFrame(glideStep);
+  }
+  $effect(() => () => cancelAnimationFrame(glideRaf));
+
+  /** La rueda en cascada: escala el paso (no salta fijo, asi el touchpad sigue suave). Con 100 %
+   *  no se toca nada; Ctrl + rueda (zoom, pellizcar en el touchpad) tampoco. */
+  function wheel(node: HTMLElement) {
+    const on = (e: WheelEvent) => {
+      const k = mangaPrefs.wheelStep / 100;
+      if (e.ctrlKey || k === 1 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const dy = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? node.clientHeight : 1) * k;
+      // Touchpad: muchos eventos chicos; van directo (ya son suaves). Rueda: animado.
+      glide(dy, e.deltaMode === 0 && Math.abs(e.deltaY) < 40);
+    };
+    node.addEventListener("wheel", on, { passive: false });
+    return { destroy: () => node.removeEventListener("wheel", on) };
+  }
+
   async function jumpCascade(s: number, p: number, smooth = false) {
     await tick();
     const el = scroller?.querySelector<HTMLElement>(`.pg[data-k="${key(s, p)}"]`);
@@ -245,12 +307,12 @@
   }
 
   function nextPage() {
-    if (mode === "cascade") return scroller?.scrollBy({ top: scroller.clientHeight * 0.85, behavior: "smooth" });
+    if (mode === "cascade") return scroller && glide(scroller.clientHeight * (mangaPrefs.keyStep / 100));
     if (si >= slides - 1) return hasNext && onnext?.();
     goSpread(si + 1);
   }
   function prevPage() {
-    if (mode === "cascade") return scroller?.scrollBy({ top: -scroller.clientHeight * 0.85, behavior: "smooth" });
+    if (mode === "cascade") return scroller && glide(-scroller.clientHeight * (mangaPrefs.keyStep / 100));
     if (si <= 0) return hasPrev && onprev?.();
     goSpread(si - 1);
   }
@@ -337,7 +399,8 @@
     const bwd = () => (e.preventDefault(), prevPage());
     if (k === "ArrowRight" || k === "d" || k === "D") return mode !== "cascade" && rtl ? bwd() : fwd();
     if (k === "ArrowLeft" || k === "a" || k === "A") return mode !== "cascade" && rtl ? fwd() : bwd();
-    if (mode === "cascade" && (k === "ArrowDown" || k === "ArrowUp")) return;
+    if (mode === "cascade" && k === "ArrowDown") return fwd();
+    if (mode === "cascade" && k === "ArrowUp") return bwd();
     if (k === " " || k === "PageDown") return e.shiftKey ? bwd() : fwd();
     if (k === "PageUp") return bwd();
     if (k === "Home") return (e.preventDefault(), scrubTo(0));
@@ -433,6 +496,7 @@
       class="scroller"
       bind:this={scroller}
       onscroll={onCascadeScroll}
+      use:wheel
       onwheel={touched}
       ontouchmove={touched}
       onkeydown={touched}
@@ -533,8 +597,18 @@
     <header class="bar top" transition:barTop>
       <button class="icon-btn" onclick={onback} aria-label={t("common.back")}><ArrowLeft size={20} /></button>
       <div class="titles">
-        <span class="t1 ellipsis">{title}</span>
-        {#if current?.title}<span class="t2 ellipsis">{current.title}</span>{/if}
+        {#if ontitle}
+          <button class="t1 ellipsis link" onclick={ontitle} title={t("reader.toDetail")}>{title}</button>
+        {:else}
+          <span class="t1 ellipsis">{title}</span>
+        {/if}
+        {#if current?.title}
+          {#if chapters?.length}
+            <button class="t2 ellipsis link" onclick={() => (picker = true)} title={t("reader.chapters")}>{current.title}<ChevronDown size={12} /></button>
+          {:else}
+            <span class="t2 ellipsis">{current.title}</span>
+          {/if}
+        {/if}
       </div>
       {#if chapters?.length}
         <button class="icon-btn" onclick={() => (picker = true)} title={t("reader.chapters")}><List size={19} /></button>
@@ -619,6 +693,16 @@
         <span class="row">{t("reader.maxWidth")}<span class="grow"></span><span class="mono">{mangaPrefs.maxWidth} px</span></span>
         <input type="range" min="480" max="1600" step="20" value={mangaPrefs.maxWidth} oninput={(e) => setPref("maxWidth", Number(e.currentTarget.value))} />
       </label>
+      <label class="field">
+        <span class="row">{t("reader.wheelStep")}<span class="grow"></span><span class="mono">{mangaPrefs.wheelStep} %</span></span>
+        <input type="range" min="50" max="400" step="10" value={mangaPrefs.wheelStep} oninput={(e) => setPref("wheelStep", Number(e.currentTarget.value))} />
+        <span class="hint">{t("reader.wheelStepHint")}</span>
+      </label>
+      <label class="field">
+        <span class="row">{t("reader.keyStep")}<span class="grow"></span><span class="mono">{mangaPrefs.keyStep} %</span></span>
+        <input type="range" min="25" max="100" step="5" value={mangaPrefs.keyStep} oninput={(e) => setPref("keyStep", Number(e.currentTarget.value))} />
+        <span class="hint">{t("reader.keyStepHint")}</span>
+      </label>
       <div class="field">
         {t("reader.gap")}
         <Seg
@@ -692,7 +776,10 @@
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
-    scrollbar-width: thin;
+    /* Barra de scroll fina con el color de la pagina (se ve sobre negro y sobre blanco). */
+    --sb-thumb: color-mix(in srgb, var(--page-fg) 26%, transparent);
+    --sb-hover: color-mix(in srgb, var(--page-fg) 48%, transparent);
+    --sb-active: color-mix(in srgb, var(--accent) 80%, transparent);
   }
   .column {
     display: flex;
@@ -895,6 +982,15 @@
     opacity: 0.8;
   }
   /* ---------- barras ---------- */
+  /* El lector va sin zoom (la pagina usa la pantalla de verdad); lo que es interfaz encima de la
+     pagina se agranda con "Tamaño de la interfaz" (lib/scale.svelte.ts). */
+  .bar,
+  .side,
+  .end > *,
+  .divider span,
+  .pg-err {
+    zoom: var(--ui-zoom, 1);
+  }
   .bar {
     position: absolute;
     left: 0;
@@ -940,6 +1036,24 @@
   .t1 {
     font-weight: 650;
     font-size: 14px;
+  }
+  .titles .link {
+    align-self: flex-start;
+    max-width: 100%;
+    text-align: left;
+    border-radius: 4px;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s, color 0.15s;
+  }
+  .titles .link:hover {
+    text-decoration-color: currentColor;
+  }
+  .t2.link {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
   }
   .t2 {
     font-size: 12px;
