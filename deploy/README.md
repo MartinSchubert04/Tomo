@@ -4,7 +4,7 @@ Two containers from `deploy/docker-compose.yml`:
 
 | Container | What | Port |
 |---|---|---|
-| `library` | API + web interface (Rust binary + the built UI) | `127.0.0.1:7710`, outside via `tailscale serve --https=7710` |
+| `library` | API + web interface (Rust binary + the built UI) | `127.0.0.1:7710`; on the tailnet `http://mrtn-server:7710` (`tailscale serve --tcp=7710`) and `https://mrtn-server.<tailnet>.ts.net:7711` (`tailscale serve --https=7711`, for installing the PWA) |
 | `library-suwayomi` | Suwayomi-Server: runs the manga extensions (scrapers) | `4567` inside the compose network only (it has no auth) |
 
 Data lives next to the compose file: `deploy/data/library/` (SQLite `library.db`, uploaded books
@@ -32,7 +32,9 @@ LIBRARY_ADMIN_USER=martin ./Library/deploy/deploy.sh   # the name is optional (d
    shown only once**. An existing `.env` is never touched.
 4. Pulls the latest Suwayomi image and runs `docker compose up -d --build`.
 5. Waits for the healthcheck (`library health` → `GET /api/health`).
-6. Publishes the app on the tailnet with `tailscale serve --bg --https=7710` (once).
+6. Publishes the app on the tailnet (once): `tailscale serve --bg --tcp=7710 tcp://127.0.0.1:7710`
+   (→ `http://mrtn-server:7710`) and `tailscale serve --bg --https=7711 http://127.0.0.1:7710`
+   (→ `https://mrtn-server.<tailnet>.ts.net:7711`, a secure context for the PWA).
 
 ## Sources (extensions)
 
@@ -54,4 +56,4 @@ docker compose exec library sh -c 'wget -qO- --post-data "{\"query\":\"{aboutSer
 ## Ports taken on MRTN-SERVER
 
 22, 53, 443, 1883, 3000, 4000, 4517, 5678, 6052, 6080, 7700, 7790, 8080, 8090, 8123, 8443, 8765,
-8766, 8787, 8788, 10200, 10300, 11987, 42069, 51515, 61208. This app uses 7710 only.
+8766, 8787, 8788, 10200, 10300, 11987, 42069, 51515, 61208. This app uses 7710 and 7711.

@@ -77,16 +77,31 @@ say "La app responde en http://127.0.0.1:${PORT}"
 docker image prune -f >/dev/null 2>&1 || true
 
 # --- 5. tailscale serve --------------------------------------------------------------------
+# Dos entradas en la tailnet: http://mrtn-server:7710 (TCP directo, la dirección corta; WireGuard ya
+# cifra) y https://<server>.ts.net:7711 (contexto seguro: instalar la PWA, service worker).
+HTTPS_PORT=7711
 if command -v tailscale >/dev/null; then
   ts() { tailscale "$@" 2>/dev/null || as_root tailscale "$@"; }
-  if ts serve status 2>/dev/null | grep -q ":${PORT}"; then
-    say "tailscale serve ya publica el puerto ${PORT}"
-  else
-    say "Publicando en la tailnet (tailscale serve --https=${PORT})"
-    ts serve --bg --https="${PORT}" "http://127.0.0.1:${PORT}"
+  status="$(ts serve status 2>/dev/null || true)"
+  if printf '%s' "$status" | grep -q "https://[^ ]*:${PORT}"; then
+    say "Pasando el ${PORT} de https a TCP (para http://<server>:${PORT})"
+    ts serve --https="${PORT}" off
   fi
-  dns="$(ts status --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -n1)"
-  if [ -n "$dns" ]; then say "Listo: https://${dns}:${PORT}"; fi
+  if printf '%s' "$status" | grep -q "tcp://[^ ]*:${PORT} "; then
+    say "tailscale serve ya publica http://<server>:${PORT}"
+  else
+    say "Publicando http://<server>:${PORT} en la tailnet"
+    ts serve --bg --tcp="${PORT}" "tcp://127.0.0.1:${PORT}" >/dev/null
+  fi
+  if printf '%s' "$status" | grep -q "https://[^ ]*:${HTTPS_PORT}"; then
+    say "tailscale serve ya publica https en ${HTTPS_PORT}"
+  else
+    say "Publicando https en ${HTTPS_PORT} (para instalar la app en el celu)"
+    ts serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:${PORT}" >/dev/null
+  fi
+  dns="$(ts status --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*//p' | head -n1)"
+  host="${dns%%.*}"
+  if [ -n "$dns" ]; then say "Listo: http://${host}:${PORT}  ·  https://${dns}:${HTTPS_PORT}"; fi
 else
   warn "tailscale no está instalado: la app queda solo en http://127.0.0.1:${PORT}"
 fi

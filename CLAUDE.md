@@ -42,10 +42,16 @@ brand.json                name and colors
 
 ## Ports (MRTN-SERVER)
 
-- `127.0.0.1:7710` the app (API + UI). Outside only via `tailscale serve --https=7710`
-  → `https://mrtn-server.<tailnet>.ts.net:7710`.
+- `127.0.0.1:7710` the app (API + UI). Outside only through the tailnet, two ways (both from
+  `deploy/deploy.sh`):
+  - `http://mrtn-server:7710`: `tailscale serve --tcp=7710` (plain TCP; WireGuard already encrypts
+    it). The short address the user wants.
+  - `https://mrtn-server.<tailnet>.ts.net:7711`: `tailscale serve --https=7711`. Needed for what
+    only works in a secure context: installing the PWA, the service worker, `crypto.subtle`.
+  The UI must keep working over plain http (guard every secure-context API).
 - Suwayomi listens on `4567` **only inside the compose network** (no published port, it has no
   auth). Debugging: `docker compose exec library curl suwayomi:4567/api/graphql`.
+- Also taken by this app: 7711 (the https one).
 - Don't use: 22, 53, 443, 1883, 3000, 4000, 4517, 5678, 6052, 6080, 7700, 7790, 8080, 8090, 8123,
   8443, 8765, 8766, 8787, 8788, 10200, 10300, 11987, 42069, 51515, 61208 (already taken).
 
