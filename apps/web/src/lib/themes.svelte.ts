@@ -8,12 +8,12 @@ import { PALETTES } from "./palettes.gen";
 import { read, write } from "./store";
 
 export const THEMES = [
-  { id: "default", name: "Default" },
+  { id: "neovim", name: "Neovim" },
+  { id: "default", name: "Mint" },
   { id: "warp", name: "Warp" },
   { id: "poolsuite", name: "Poolsuite FM" },
   { id: "haze", name: "Haze" },
   { id: "athanor", name: "Athanor" },
-  { id: "neovim", name: "Neovim" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
@@ -32,7 +32,7 @@ export function isTheme(t: unknown): t is ThemeId {
 
 const isPalette = (t: ThemeId, p: unknown): p is string => typeof p === "string" && palettesOf(t).some((x) => x.id === p);
 
-export const DEFAULT_THEME: ThemeId = "default";
+export const DEFAULT_THEME: ThemeId = "neovim";
 
 /** El tema en uso (reactivo). */
 export const look = $state<{ theme: ThemeId; palettes: Partial<Record<ThemeId, string>> }>({

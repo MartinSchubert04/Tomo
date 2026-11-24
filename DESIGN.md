@@ -21,7 +21,7 @@ left off.
 - **Voice:** literal, Spanish by default (neutral Rioplatense, voseo) or English. "Leer", "Seguir en
   el cap. 12", "Agregar a la biblioteca", "Subir libros", "Capítulo siguiente" / "Read", "Continue
   chapter 12", "Add to library", "Upload books", "Next chapter". No metaphors.
-- **Six themes, one structure** (Default, Warp, Poolsuite FM, Haze, Athanor, Neovim, each with its
+- **Six themes, one structure** (Neovim is the default; Mint (id `default`), Warp, Poolsuite FM, Haze, Athanor, Neovim, each with its
   palettes, exactly Mythos'). Colors, borders, shadows, backgrounds and fonts change; never the
   layout. Readers have their own page colors (section 4, "Reader") independent of the theme.
 

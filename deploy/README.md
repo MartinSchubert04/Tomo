@@ -12,6 +12,10 @@ under `books/`, covers under `covers/`) and `deploy/data/suwayomi/` (Suwayomi's 
 installed extensions, its thumbnail cache). Both owned by uid 1000. Back them up with Kopia like
 the rest of the server.
 
+**On MRTN-SERVER `deploy/data` is a symlink to `/mnt/data/library`**, on its own 95 GB partition
+(`nvme0n1p8`, ext4, mounted by `/etc/fstab` with `nofail`), so books and Suwayomi never fill `/`.
+`deploy.sh` and compose follow the symlink; don't replace it with a real folder.
+
 ## First time and updates
 
 ```bash
