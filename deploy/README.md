@@ -6,6 +6,7 @@ Two containers from `deploy/docker-compose.yml`:
 |---|---|---|
 | `library` | API + web interface (Rust binary + the built UI) | `127.0.0.1:7710`; on the tailnet `http://mrtn-server:7710` (`tailscale serve --tcp=7710`) and `https://mrtn-server.<tailnet>.ts.net:7711` (`tailscale serve --https=7711`, for installing the PWA) |
 | `library-suwayomi` | Suwayomi-Server: runs the manga extensions (scrapers) | `4567` inside the compose network only (it has no auth) |
+| `library-flaresolverr` | FlareSolverr: solves Cloudflare challenges for the sources behind it | `8191` inside the compose network only |
 
 Data lives next to the compose file: `deploy/data/library/` (SQLite `library.db`, uploaded books
 under `books/`, covers under `covers/`) and `deploy/data/suwayomi/` (Suwayomi's database,
@@ -46,6 +47,13 @@ Suwayomi itself is never exposed; for debugging:
 docker compose exec library sh -c 'wget -qO- --post-data "{\"query\":\"{aboutServer{version}}\"}" \
   --header content-type:application/json http://suwayomi:4567/api/graphql'
 ```
+
+## Cloudflare sources
+
+Some sources sit behind Cloudflare ("Cloudflare bypass currently disabled"). Suwayomi solves those
+through FlareSolverr; its settings `flareSolverrEnabled: true` and
+`flareSolverrUrl: http://flaresolverr:8191` were set once with a `setSettings` GraphQL mutation and
+live in Suwayomi's data.
 
 ## Resources
 

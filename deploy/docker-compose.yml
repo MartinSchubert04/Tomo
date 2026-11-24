@@ -23,6 +23,7 @@ services:
       - ./data/library:/data
     depends_on:
       - suwayomi
+      - flaresolverr
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "library", "health"]
@@ -47,6 +48,23 @@ services:
     volumes:
       - ./data/suwayomi:/home/suwayomi/.local/share/Tachidesk
     mem_limit: 1280m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Pasa los desafíos de Cloudflare de algunas fuentes (Suwayomi lo usa si está activado en sus
+  # ajustes: flareSolverrEnabled + flareSolverrUrl=http://flaresolverr:8191, lo deja la app).
+  # Sin puertos publicados: solo lo ve Suwayomi por la red interna.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: library-flaresolverr
+    restart: unless-stopped
+    environment:
+      TZ: America/Argentina/Buenos_Aires
+      LOG_LEVEL: warning
+    mem_limit: 768m
     logging:
       driver: json-file
       options:
