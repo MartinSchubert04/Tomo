@@ -1,0 +1,50 @@
+# La app en el server: `library` (API + UI) y `suwayomi` (las extensiones de manga). Suwayomi no
+# tiene auth: no publica ningún puerto, solo lo ve `library` por la red interna del compose.
+# La app publica 127.0.0.1:7710 y afuera se ve con `tailscale serve`. Ver deploy/README.md.
+services:
+  library:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: library:latest
+    container_name: library
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      LIBRARY_BIND: 0.0.0.0:7710
+      LIBRARY_SUWAYOMI_URL: http://suwayomi:4567
+    ports:
+      - "127.0.0.1:7710:7710"
+    volumes:
+      - ./data/library:/data
+    depends_on:
+      - suwayomi
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "library", "health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:stable
+    container_name: library-suwayomi
+    restart: unless-stopped
+    environment:
+      TZ: America/Argentina/Buenos_Aires
+      # La JVM agarra lo que ve; con esto no pasa de ~1 GB en total.
+      JAVA_TOOL_OPTIONS: -Xmx768m -XX:+UseSerialGC
+    volumes:
+      - ./data/suwayomi:/home/suwayomi/.local/share/Tachidesk
+    mem_limit: 1280m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

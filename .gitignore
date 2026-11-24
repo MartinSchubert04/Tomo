@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+data/
+.env
+*.log
+.env.local
+.env.*.local
+.claude/worktrees/
