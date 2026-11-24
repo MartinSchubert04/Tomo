@@ -1,0 +1,112 @@
+/* Medidas de la app que no son colores (los colores siguen siendo solo de themes.css). */
+
+:root {
+  /* Margen lateral de las paginas (filas, grillas). */
+  --gutter: clamp(16px, 3vw, 40px);
+  /* Alto de la barra de pestañas del celular (sin el area segura). */
+  --tabbar-h: 58px;
+  /* Colores de la pagina en los lectores: los pone el lector segun sus ajustes. */
+  --page-bg: #000;
+  --page-fg: #d6d6d6;
+}
+
+/* Titulo grande sobre un fondo (detalle). */
+.display-title {
+  font-family: var(--display);
+  font-weight: 760;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0;
+}
+
+/* Grilla de portadas (explorar, biblioteca, libros, busqueda). */
+.cover-grid {
+  --card-w: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 16px;
+}
+@media (max-width: 759px) {
+  .cover-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 16px 10px;
+  }
+}
+
+/* Paginas de la app: el margen lateral y abajo el lugar de la barra de pestañas. */
+.view {
+  padding: 22px var(--gutter) 48px;
+}
+@media (max-width: 759px) {
+  .view {
+    padding: 14px var(--gutter) calc(32px + var(--tabbar-h) + env(safe-area-inset-bottom));
+  }
+  .page-head h1 {
+    font-size: 19px;
+  }
+}
+
+/* Fila de pastillas que scrollea de costado (fuentes, generos, filtros). */
+.chips-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 2px 6px;
+  margin: -2px -2px 0;
+}
+.chips-scroll::-webkit-scrollbar {
+  display: none;
+}
+/* Pastilla que se puede elegir. */
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+  flex: none;
+  border-radius: 999px;
+  border: var(--border) solid var(--line);
+  background: var(--panel);
+  color: var(--text-2);
+  font-weight: 560;
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s,
+    transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.pick:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.pick:active {
+  transform: scale(0.96);
+}
+.pick.on {
+  background: var(--primary-bg);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+[data-theme="poolsuite"] .pick.on {
+  border-color: var(--line);
+}
+
+/* View Transitions: la portada vuela con una curva suave; el resto hace un fundido corto. */
+::view-transition-group(*) {
+  animation-duration: 0.38s;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.24s;
+}
+::view-transition-old(*),
+::view-transition-new(*) {
+  height: 100%;
+  object-fit: cover;
+  overflow: clip;
+}
