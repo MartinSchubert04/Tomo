@@ -99,7 +99,7 @@ if command -v tailscale >/dev/null; then
     say "Publicando https en ${HTTPS_PORT} (para instalar la app en el celu)"
     ts serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:${PORT}" >/dev/null
   fi
-  dns="$(ts status --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*//p' | head -n1)"
+  dns="$(ts status --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -n1)"
   host="${dns%%.*}"
   if [ -n "$dns" ]; then say "Listo: http://${host}:${PORT}  ·  https://${dns}:${HTTPS_PORT}"; fi
 else
