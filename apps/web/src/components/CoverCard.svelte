@@ -15,6 +15,8 @@
     sub = "",
     onmenu,
     href,
+    onopen,
+    badge = "",
   }: {
     work: WorkCard;
     /** Posicion en la grilla (aparicion escalonada). */
@@ -26,6 +28,10 @@
     onmenu?: (x: number, y: number) => void;
     /** Ruta a la que lleva (por defecto el detalle del manga o el lector del libro). */
     href?: string;
+    /** En vez de navegar, esto (p. ej. abrir el detalle de un libro de un catalogo). */
+    onopen?: () => void;
+    /** Insignia abajo a la izquierda (p. ej. "#3" en una saga, o un tilde si ya esta). */
+    badge?: string;
   } = $props();
 
   const target = $derived(href ?? (work.kind === "manga" ? `/manga/${work.id}` : `/book/${work.id}`));
@@ -34,6 +40,11 @@
   let flying = $state(false);
 
   function open(e: MouseEvent) {
+    if (onopen) {
+      e.preventDefault();
+      onopen();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.button === 1) return;
     e.preventDefault();
     flying = work.kind === "manga";
@@ -52,6 +63,7 @@
   <span class="frame">
     <Img src={work.cover} alt="" fallback={work.title} fallbackSub={sub} vt={flying ? vt : ""} />
     {#if work.format}<span class="badge fmt">{work.format.toUpperCase()}</span>{/if}
+    {#if badge}<span class="badge tag">{badge}</span>{/if}
     {#if unread}<span class="badge unread">{unread > 99 ? "99+" : unread}</span>{/if}
     {#if progress !== null && progress > 0}
       <span class="bar"><span style="transform: scaleX({Math.min(1, progress)})"></span></span>
@@ -146,6 +158,14 @@
     left: 6px;
     background: var(--media-scrim);
     color: var(--on-media);
+  }
+  .tag {
+    top: auto;
+    bottom: 10px;
+    left: 6px;
+    background: var(--primary-bg);
+    color: var(--accent-ink);
+    box-shadow: 0 2px 8px -2px var(--media-scrim);
   }
   .bar {
     position: absolute;

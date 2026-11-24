@@ -118,6 +118,30 @@ ALTER TABLE chapters ADD COLUMN lang TEXT;
 ALTER TABLE chapters ADD COLUMN scanlator TEXT;
 CREATE INDEX chapters_number ON chapters(work_id, number);
 "#,
+    // 3: datos de los libros que se leen del archivo o de Open Library (saga y número, idioma,
+    // sinopsis, año), de dónde vino (`origin`: catálogo, "inbox" o NULL = subido) y la URL de
+    // origen (para no importar dos veces lo mismo de un catálogo). Y los catálogos de libros: los
+    // que vienen de fábrica (`preset`) y los OPDS que agrega el admin.
+    r#"
+ALTER TABLE books ADD COLUMN series TEXT;
+ALTER TABLE books ADD COLUMN series_index REAL;
+ALTER TABLE books ADD COLUMN language TEXT;
+ALTER TABLE books ADD COLUMN description TEXT;
+ALTER TABLE books ADD COLUMN year INTEGER;
+ALTER TABLE books ADD COLUMN source_url TEXT;
+ALTER TABLE books ADD COLUMN origin TEXT;
+CREATE INDEX books_source_url ON books(source_url);
+CREATE INDEX books_series ON books(series, series_index);
+CREATE TABLE catalogs (
+    id       TEXT PRIMARY KEY,                  -- "archive", "gutenberg", "elejandria" u "o<n>"
+    name     TEXT NOT NULL,
+    kind     TEXT NOT NULL,                     -- "opds" | "archive" | "elejandria"
+    url      TEXT NOT NULL,
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    preset   INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL
+);
+"#,
 ];
 
 #[derive(Clone)]

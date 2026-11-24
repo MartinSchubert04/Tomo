@@ -3,17 +3,20 @@
   // los resultados: primero lo propio al instante (biblioteca y libros subidos), despues una fila
   // por fuente a medida que contestan (NDJSON). Con `alt` (una sugerencia de AniList) cada fuente
   // busca tambien esos titulos; sin `alt`, el server le pregunta a AniList si lo escrito es el
-  // nombre de una obra en otro idioma ("attack on titan" → "Shingeki no Kyojin").
+  // nombre de una obra en otro idioma ("attack on titan" → "Shingeki no Kyojin"). Al final, los
+  // libros gratis de los catalogos (una fila por catalogo, tambien a medida que contestan).
   import { LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
   import { flip } from "svelte/animate";
+  import CatalogEntryDrawer from "../components/CatalogEntryDrawer.svelte";
   import CoverCard from "../components/CoverCard.svelte";
   import Row from "../components/Row.svelte";
-  import { api, errText, searchAll } from "../lib/api";
+  import { api, errText, searchAll, searchCatalogs } from "../lib/api";
+  import { entryWork } from "../lib/catalogs";
   import { t } from "../lib/i18n.svelte";
   import { flipMs, rise } from "../lib/motion";
   import { go, route } from "../lib/router.svelte";
   import { loadSources, searchSources } from "../lib/sources.svelte";
-  import type { Book, LibraryEntry, SearchGroup, WorkCard } from "../lib/types";
+  import type { Book, Catalog, CatalogEntry, CatalogGroup, LibraryEntry, SearchGroup, WorkCard } from "../lib/types";
 
   let q = $state("");
   let alsoAs = $state<string[]>([]);
@@ -23,6 +26,22 @@
   let library = $state<LibraryEntry[]>([]);
   let books = $state<Book[]>([]);
   let ctrl: AbortController | null = null;
+  let catGroups = $state<CatalogGroup[]>([]);
+  let catCtrl: AbortController | null = null;
+  let open = $state<{ catalog: Catalog; entry: CatalogEntry } | null>(null);
+
+  // Libros gratis: en paralelo con las fuentes de manga (no la demoran).
+  function runCatalogs(term: string) {
+    catCtrl?.abort();
+    catGroups = [];
+    if (term.length < 2) return;
+    const c = (catCtrl = new AbortController());
+    searchCatalogs(term, (g) => !c.signal.aborted && g.entries.length && (catGroups = [...catGroups, g]), c.signal).catch(() => {});
+  }
+  function imported(e: CatalogEntry, b: Book) {
+    catGroups = catGroups.map((g) => ({ ...g, entries: g.entries.map((x) => (x.id === e.id ? { ...x, imported: b.id } : x)) }));
+    books = [b, ...books];
+  }
 
   api.library().then((l) => (library = l)).catch(() => {});
   api.books().then((b) => (books = b)).catch(() => {});
@@ -84,6 +103,7 @@
     if (key === lastKey) return;
     lastKey = key;
     run(term, alts);
+    runCatalogs(term.trim());
   });
 
   async function retry(g: SearchGroup) {
@@ -136,9 +156,19 @@
       </div>
     {/each}
 
+    {#each catGroups as g (g.catalog.id)}
+      <div class="group-host" in:rise>
+        <Row title={t("search.books", { name: g.catalog.name, n: g.entries.length })} items={g.entries} href={`/books?tab=explore&catalog=${g.catalog.id}&q=${encodeURIComponent(q)}`}>
+          {#snippet card(e: CatalogEntry, i: number)}
+            <CoverCard work={entryWork(e)} {i} sub={e.author ?? ""} badge={e.imported ? "✓" : ""} onopen={() => (open = { catalog: g.catalog, entry: e })} />
+          {/snippet}
+        </Row>
+      </div>
+    {/each}
+
     {#if searching}
       <div class="searching faint"><LoaderCircle size={15} class="spin" />{t("search.searching", { n: groups.length })}</div>
-    {:else if !found.length && !mine.length && !error}
+    {:else if !found.length && !mine.length && !catGroups.length && !error}
       <div class="empty"><h3>{t("search.none", { q })}</h3><p class="muted">{t("search.noneHint")}</p></div>
     {/if}
     {#if error}<div class="empty"><p class="muted">{error}</p></div>{/if}
@@ -159,6 +189,10 @@
     {/if}
   {/if}
 </div>
+
+{#if open}
+  <CatalogEntryDrawer catalog={open.catalog} entry={open.entry} onclose={() => (open = null)} onimported={imported} />
+{/if}
 
 <style>
   .also {

@@ -72,6 +72,12 @@ type Book = WorkCard & {
   addedAt: number;
   uploader: string;       // user name
   pages: number | null;   // cbz: page count; pdf: filled by the client after first open
+  series: string | null;  // from the EPUB (calibre:series or EPUB 3 belongs-to-collection) or edited
+  seriesIndex: number | null;
+  language: string | null; // "es", "en"... (normalized: spa/Spanish/es-AR → es)
+  description: string | null;
+  year: number | null;
+  origin: string | null;  // catalog name, "inbox", or null (uploaded)
 };
 
 type LibraryStatus = "reading" | "planned" | "completed" | "onhold" | "dropped";
@@ -196,14 +202,14 @@ manga in anyone's library (3 at a time). `unread`, `newChapters` and `latestChap
 there. Each chapter remembers when it was first seen: the ones of the first fetch count as already
 there, so adding a manga with 400 chapters doesn't make 400 "new" ones.
 
-## Books (uploads, shared by all users)
+## Books (shared by all users: uploads, catalog imports and the inbox folder)
 
 | Method | Route | Body | Response |
 |---|---|---|---|
 | GET | `/api/books` | | `Book[]`, newest first |
-| POST | `/api/books` | `multipart/form-data`, one or more `file` fields (≤ 1 GB each) | `Book[]`. Format by extension (and magic bytes for zip/pdf). `.zip` and `.cbz` = `cbz`. EPUB: title, author and cover from the OPF. CBZ: cover = first image (natural sort). Others: title = file name |
+| POST | `/api/books` | `multipart/form-data`, one or more `file` fields (≤ 1 GB each) | `Book[]`. Format by extension (and magic bytes for zip/pdf). `.zip` and `.cbz` = `cbz`. EPUB: title, author, cover, series and number, language, synopsis and year from the OPF. CBZ: cover = first image (natural sort). Others: title = file name. Afterwards, in the background, Open Library fills whatever is still missing (author, year, language, synopsis, cover); it never overwrites what the file had |
 | GET | `/api/books/{id}` | | `Book` |
-| PATCH | `/api/books/{id}` | `{ title?, author? }` (`author: ""` clears it) | `Book` (uploader or admin; 403 otherwise) |
+| PATCH | `/api/books/{id}` | `{ title?, author?, series?, seriesIndex?, language?, description?, year? }` (`""` clears a text field; `series: ""` also clears the number; `year: 0` clears it) | `Book` (uploader or admin; 403 otherwise) |
 | DELETE | `/api/books/{id}` | | 204 (uploader or admin) |
 | GET | `/api/books/{id}/file` | | the file, with `Range` support and its `Content-Type` |
 | GET | `/api/books/{id}/cover` | | image (404 if none). `Cache-Control: private, max-age=86400` |
@@ -211,3 +217,64 @@ there, so adding a manga with 400 chapters doesn't make 400 "new" ones.
 | PUT | `/api/books/{id}/pages` | `{ pages: number }` | 204 (the UI reports a PDF's page count) |
 | GET | `/api/books/{id}/pages` | | `{ pages: string[] }` (cbz only) |
 | GET | `/api/books/{id}/pages/{n}` | | the n-th image inside the cbz (natural sort, images only) |
+
+## Book catalogs (free and legal only)
+
+Where to get books besides uploading them. Only public domain or openly licensed libraries; never
+shadow libraries. Built-in ("preset") catalogs, Spanish first:
+
+| id | What | How |
+|---|---|---|
+| `elejandria` | Elejandría: ~2.400 free and legal ebooks in Spanish | No API: the book list comes from its `sitemap.xml` and its per-letter lists (`/libros/a`…), refreshed daily and searched in memory (its `/buscar` is disallowed by `robots.txt`); a book's page gives the synopsis, cover and download link |
+| `textos` | textos.info: ~6.000 Spanish public domain texts | OPDS |
+| `archive` | Internet Archive, Spanish texts that are verified public domain (`collection:gutenberg` or `possible-copyright-status:NOT_IN_COPYRIGHT`), never lending items (`access-restricted-item`), with an EPUB or text PDF | `advancedsearch.php`, `metadata/<id>`, `download/<id>/<file>` |
+| `gutenberg` | Project Gutenberg (mostly English; its Spanish books are mirrored on Internet Archive). **Off by default** | OPDS |
+
+Each one can be switched off with an empty `LIBRARY_*_URL` (see `deploy/.env.example`). Admins
+add any other OPDS catalog by URL (their Calibre, Kavita, a public library).
+
+```ts
+type Catalog = { id: string; name: string; kind: "opds" | "archive" | "elejandria"; url?: string /* admins */; enabled: boolean; preset: boolean; spanish: boolean };
+type CatalogEntry = {
+  id: string;             // opaque: send it back to import or get the detail
+  title: string; author: string | null; cover: string | null /* same-origin URL */;
+  language: string | null; year: number | null; summary: string | null;
+  formats: string[];      // "epub", "pdf"... downloadable ones
+  imported: string | null; // "b12" if it's already in the books
+  url: string | null;     // the book's page on the original site
+};
+type CatalogPage = { title: string | null; entries: CatalogEntry[]; navigation: { title: string; path: string }[]; next: string | null };
+```
+
+| Method | Route | Body | Response |
+|---|---|---|---|
+| GET | `/api/catalogs` | | `Catalog[]` (enabled ones, Spanish first, no `url`) |
+| GET | `/api/catalogs/{id}/browse?q=&path=&lang=all` | | `CatalogPage`. Without `q`: the popular/newest books (an OPDS root that only has sections opens its first one, and keeps the sections in `navigation`). `path`: a `navigation[].path` or `next` from a previous page (opaque, signed by the server). `lang=all`: don't filter to Spanish (by default, OPDS entries that say another language and non-Spanish Internet Archive items are left out) |
+| GET | `/api/catalogs/{id}/entry/{entryId}` | | `CatalogEntry` with the synopsis and real title (Elejandría, Internet Archive; 404 for OPDS, whose list already has everything) |
+| GET | `/api/catalogs/search?q=&lang=all` | | **NDJSON**, one line per enabled catalog as soon as it answers: `{ catalog: Catalog, entries: CatalogEntry[], error?: string }`. 15 s per catalog, 6 at a time |
+| POST | `/api/catalogs/{id}/import` | `{ entry: string, hint?: { title, author, language, summary, year } }` | `Book`: **201** if it was downloaded now, **200** if it was already there (same source URL). The file is streamed to disk (≤ `LIBRARY_MAX_UPLOAD_MB`) and checked (zip/PDF magic bytes). `hint` (what the list showed) fills what the file doesn't have. 403 for Internet Archive lending items, 400 for an entry the server didn't sign |
+| GET | `/api/catalogs/{id}/cover/{entryId}` | | the cover, looked up on the book's page (Elejandría books not in its lists) |
+| GET | `/api/img/cat?t=` | | proxy for catalog covers. Only URLs the server signed (HMAC with a key made at every start): it's never an open proxy. `Cache-Control: private, max-age=604800` |
+
+Admin (403 otherwise):
+
+| Method | Route | Body | Response |
+|---|---|---|---|
+| GET | `/api/admin/catalogs` | | `Catalog[]` with `url`, including disabled ones |
+| POST | `/api/admin/catalogs` | `{ url, name? }` | `Catalog`. The URL is fetched first: 400 if it isn't an OPDS feed, 409 if it's already there. Name: the feed's title |
+| PATCH | `/api/admin/catalogs/{id}` | `{ enabled?, name? }` | 204 (presets can be turned off but not renamed) |
+| DELETE | `/api/admin/catalogs/{id}` | | 204; 409 for presets (turn them off instead) |
+
+## Inbox folder
+
+Files left in `<LIBRARY_DATA>/inbox` (by hand, SFTP, Syncthing) are imported every
+`LIBRARY_INBOX_SECONDS` (30): only when a file stopped changing (same size as the previous check
+and untouched for 10 s). Partial downloads (`.part`, `.tmp`, `.crdownload`, Syncthing temp files)
+and hidden files are skipped. Files that can't be imported are moved to `inbox/failed/` with a
+`<name>.error.txt` next to them. Imported books get `uploader: "inbox"`, `origin: "inbox"`.
+
+| Method | Route | Response |
+|---|---|---|
+| GET | `/api/admin/inbox` | `{ path, hostPath, pending: string[], failed: { name, error }[] }` (`hostPath` from `LIBRARY_INBOX_LABEL`) |
+| POST | `/api/admin/inbox/scan` | the same, after checking now (two passes, without waiting the 10 s) |
+

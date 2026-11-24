@@ -37,6 +37,19 @@ LIBRARY_ADMIN_USER=martin ./Tomo/deploy/deploy.sh   # the name is optional (defa
    (→ `http://mrtn-server:7710`) and `tailscale serve --bg --https=7711 http://127.0.0.1:7710`
    (→ `https://mrtn-server.<tailnet>.ts.net:7711`, a secure context for the PWA).
 
+## Books: inbox folder and catalogs
+
+- **Inbox folder.** Anything dropped in `deploy/data/library/inbox/` — on MRTN-SERVER that's
+  **`/mnt/data/library/library/inbox`** — is imported into Books within ~30 s (EPUB, PDF, CBZ,
+  MOBI, AZW3, FB2, TXT), with series, cover and author. Files that fail go to `inbox/failed/` with a
+  `.error.txt`. The folder is owned by uid 1000 (same as `tincho`), so a Syncthing folder pointed
+  there works as is (like the music sync): a PC folder → the server's inbox. Admin → Catálogos
+  shows what's waiting and what failed, and has "Check now".
+- **Catalogs.** Free and legal libraries only (Elejandría, textos.info, Internet Archive's public
+  domain, Gutenberg off by default; see `docs/API.md`). Switch them off with an empty
+  `LIBRARY_*_URL` in `deploy/.env`, or from Admin → Catálogos; admins can add any OPDS catalog.
+- **Open Library** fills missing metadata after an import (`LIBRARY_OPENLIBRARY_URL`, empty = off).
+
 ## Sources (extensions)
 
 On start the app adds `LIBRARY_EXTENSION_REPO` (Keiyoushi by default) to Suwayomi if it has no

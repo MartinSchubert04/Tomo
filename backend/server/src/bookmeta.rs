@@ -88,6 +88,84 @@ pub struct Meta {
     /// (bytes, extensión)
     pub cover: Option<(Vec<u8>, &'static str)>,
     pub pages: Option<i64>,
+    /// Saga y número dentro de ella (`calibre:series` o `belongs-to-collection` de EPUB 3).
+    pub series: Option<String>,
+    pub series_index: Option<f64>,
+    /// Idioma normalizado (`es`, `en`...; ver `normalize_lang`).
+    pub language: Option<String>,
+    pub description: Option<String>,
+    pub year: Option<i64>,
+}
+
+/// `es-AR`, `spa`, `Spanish`, `español` → `es`; lo que no conoce lo deja en minúsculas (2-3 letras).
+pub fn normalize_lang(raw: &str) -> Option<String> {
+    let l = raw.trim().to_lowercase();
+    let base = l.split(['-', '_']).next().unwrap_or("").trim();
+    let v = match base {
+        "" => return None,
+        "spa" | "spanish" | "español" | "espanol" | "castellano" | "esp" => "es",
+        "eng" | "english" | "inglés" | "ingles" => "en",
+        "por" | "portuguese" | "português" | "portugues" => "pt",
+        "fre" | "fra" | "french" | "francés" | "frances" => "fr",
+        "ger" | "deu" | "german" | "alemán" | "aleman" => "de",
+        "ita" | "italian" | "italiano" => "it",
+        "lat" | "latin" | "latín" => "la",
+        "cat" | "catalan" | "català" | "catalán" => "ca",
+        x if x.len() <= 3 && x.chars().all(|c| c.is_ascii_alphabetic()) => x,
+        _ => return None,
+    };
+    Some(v.to_string())
+}
+
+/// Texto plano a partir de HTML simple (sinopsis de OPF, OPDS u Open Library): saca etiquetas,
+/// resuelve las entidades comunes, junta espacios y corta en `max` caracteres.
+pub fn plain_text(html: &str, max: usize) -> String {
+    let mut out = String::with_capacity(html.len().min(max * 2));
+    let mut tag: Option<String> = None;
+    for ch in html.chars() {
+        match (&mut tag, ch) {
+            (None, '<') => tag = Some(String::new()),
+            (Some(name), '>') => {
+                // Las etiquetas de bloque separan palabras; las de línea (<b>, <em>) no.
+                let n = name.trim_start_matches('/').split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or("").to_ascii_lowercase();
+                if matches!(n.as_str(), "p" | "br" | "div" | "li" | "ul" | "ol" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "tr" | "td" | "blockquote" | "section") {
+                    out.push(' ');
+                }
+                tag = None;
+            }
+            (Some(name), c) => {
+                if name.len() < 16 {
+                    name.push(c);
+                }
+            }
+            (None, c) => out.push(c),
+        }
+    }
+    let out = out
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    let v: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if v.chars().count() > max {
+        let mut t: String = v.chars().take(max).collect();
+        t.push('…');
+        t
+    } else {
+        v
+    }
+}
+
+/// Año de una fecha cualquiera ("1605", "1605-01-01", "c. 1890"): los primeros 4 dígitos seguidos.
+pub fn year_of(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    (0..b.len().saturating_sub(3))
+        .find(|&i| b[i..i + 4].iter().all(u8::is_ascii_digit) && (i + 4 == b.len() || !b[i + 4].is_ascii_digit()) && (i == 0 || !b[i - 1].is_ascii_digit()))
+        .and_then(|i| s[i..i + 4].parse().ok())
+        .filter(|y| (1000..=2100).contains(y))
 }
 
 /// Lo que se pueda sacar del archivo según su formato. Nunca falla: sin datos → `Meta` vacío.
@@ -179,6 +257,11 @@ fn epub_meta(path: &Path) -> anyhow::Result<Meta> {
 
     let mut meta = Meta::default();
     let mut cover_id: Option<String> = None;
+    // EPUB 3: <meta property="belongs-to-collection" id="c1">Saga</meta> y
+    // <meta refines="#c1" property="group-position">3</meta>.
+    let mut collections: Vec<(String, String)> = Vec::new();
+    let mut positions: Vec<(String, String)> = Vec::new();
+    let mut meta_id = String::new();
     // id → (href, media-type, properties)
     let mut items: Vec<(String, String, String, String)> = Vec::new();
     let mut rd = Reader::from_reader(opf.as_slice());
@@ -197,10 +280,41 @@ fn epub_meta(path: &Path) -> anyhow::Result<Meta> {
                     current = Some("creator");
                     acc.clear();
                 }
+                "language" if meta.language.is_none() => {
+                    current = Some("language");
+                    acc.clear();
+                }
+                "description" if meta.description.is_none() => {
+                    current = Some("description");
+                    acc.clear();
+                }
+                "date" if meta.year.is_none() => {
+                    current = Some("date");
+                    acc.clear();
+                }
+                "meta" => match attr(&e, "property").as_deref() {
+                    Some("belongs-to-collection") => {
+                        current = Some("collection");
+                        meta_id = attr(&e, "id").unwrap_or_default();
+                        acc.clear();
+                    }
+                    Some("group-position") => {
+                        current = Some("position");
+                        meta_id = attr(&e, "refines").unwrap_or_default().trim_start_matches('#').to_string();
+                        acc.clear();
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
             Event::Empty(e) => match local_name(e.name().as_ref()).as_str() {
                 "meta" if attr(&e, "name").as_deref() == Some("cover") => cover_id = attr(&e, "content"),
+                "meta" if attr(&e, "name").as_deref() == Some("calibre:series") => {
+                    meta.series = attr(&e, "content").map(|v| v.trim().chars().take(300).collect::<String>()).filter(|v| !v.is_empty());
+                }
+                "meta" if attr(&e, "name").as_deref() == Some("calibre:series_index") => {
+                    meta.series_index = attr(&e, "content").and_then(|v| v.trim().parse::<f64>().ok()).filter(|n| n.is_finite() && *n >= 0.0);
+                }
                 "item" => items.push((
                     attr(&e, "id").unwrap_or_default(),
                     attr(&e, "href").unwrap_or_default(),
@@ -220,11 +334,23 @@ fn epub_meta(path: &Path) -> anyhow::Result<Meta> {
             }
             Event::End(_) => {
                 if let Some(which) = current.take() {
-                    let v: String = acc.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
-                    if !v.is_empty() {
-                        match which {
-                            "title" => meta.title = Some(v),
-                            _ => meta.author = Some(v),
+                    if which == "description" {
+                        let v = plain_text(&acc, 4000);
+                        if !v.is_empty() {
+                            meta.description = Some(v);
+                        }
+                    } else {
+                        let v: String = acc.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
+                        if !v.is_empty() {
+                            match which {
+                                "title" => meta.title = Some(v),
+                                "creator" => meta.author = Some(v),
+                                "language" => meta.language = normalize_lang(&v),
+                                "date" => meta.year = year_of(&v),
+                                "collection" => collections.push((std::mem::take(&mut meta_id), v)),
+                                "position" => positions.push((std::mem::take(&mut meta_id), v)),
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -233,6 +359,12 @@ fn epub_meta(path: &Path) -> anyhow::Result<Meta> {
             _ => {}
         }
         buf.clear();
+    }
+    if meta.series.is_none() {
+        if let Some((id, name)) = collections.into_iter().next() {
+            meta.series = Some(name);
+            meta.series_index = positions.iter().find(|(r, _)| *r == id).and_then(|(_, p)| p.trim().parse::<f64>().ok());
+        }
     }
     let is_image = |m: &str| m.starts_with("image/");
     let cover = items

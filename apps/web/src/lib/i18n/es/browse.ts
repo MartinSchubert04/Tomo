@@ -53,6 +53,8 @@ export default {
   "search.alsoAs": "Buscado también como",
   "search.resultsFor": "Resultados para «{q}»",
   "search.onlyThis": "Buscar solo este título",
+  "search.books": "Libros gratis en {name} · {n}",
+  "search.inCatalogs": "Buscar «{q}» en los libros gratis",
   "suggest.searchAll": "Buscar «{q}» en todas las fuentes",
   "suggest.aka": "También: {titles}",
   "suggest.none": "Sin sugerencias. Enter busca en todas las fuentes.",

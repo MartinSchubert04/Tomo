@@ -16,7 +16,7 @@
   // ↑/↓ para moverse, Enter para elegir, Esc para cerrar. Pedidos con 200 ms de espera y
   // cancelables; resultados cacheados por texto mientras la pagina esta abierta. En el celular es
   // la misma barra a pantalla completa (`full`).
-  import { ArrowRight, BookOpen, CornerDownLeft, LoaderCircle, Search, Sparkles, X } from "@lucide/svelte";
+  import { ArrowRight, BookOpen, CornerDownLeft, Library, LoaderCircle, Search, Sparkles, X } from "@lucide/svelte";
   import { api } from "../lib/api";
   import { t } from "../lib/i18n.svelte";
   import { fadeQuick, pop } from "../lib/motion";
@@ -95,8 +95,16 @@
     fetchSoon();
   }
 
-  /** Las filas del panel: 0 = "Buscar en todas las fuentes", despues las sugerencias. */
-  const rows = $derived(q ? items.length + 1 : 0);
+  /** Las filas del panel: 0 = "Buscar en todas las fuentes", despues las sugerencias y al final
+   *  "Buscar en los libros gratis" (los catalogos de Libros). */
+  const rows = $derived(q ? items.length + 2 : 0);
+  const booksRow = $derived(items.length + 1);
+
+  function searchBooks() {
+    if (!q) return;
+    close();
+    go(`/books?tab=explore&q=${encodeURIComponent(q)}`);
+  }
 
   function searchAll() {
     if (!q) return;
@@ -119,6 +127,7 @@
 
   function pick(i: number) {
     if (i === 0) searchAll();
+    else if (i === booksRow) searchBooks();
     else if (items[i - 1]) choose(items[i - 1]);
   }
 
@@ -244,6 +253,11 @@
       {#if !loading && !items.length && q.length >= 2}
         <div class="none faint">{t("suggest.none")}</div>
       {/if}
+      <button class="opt all books-row" class:on={active === booksRow} data-i={booksRow} role="option" aria-selected={active === booksRow} onpointerenter={() => (active = booksRow)} onclick={searchBooks}>
+        <span class="ico"><Library size={16} /></span>
+        <span class="txt">{t("search.inCatalogs", { q })}</span>
+        <span class="hint go"><ArrowRight size={14} /></span>
+      </button>
     </div>
   {/if}
 </div>
@@ -350,6 +364,11 @@
   .opt.all {
     min-height: 44px;
     font-weight: 600;
+  }
+  .opt.books-row {
+    border-top: var(--border) solid var(--line);
+    font-weight: 560;
+    color: var(--text-2);
   }
   .ico {
     width: 36px;

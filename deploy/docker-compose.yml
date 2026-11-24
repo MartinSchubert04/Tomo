@@ -17,6 +17,8 @@ services:
     environment:
       LIBRARY_BIND: 0.0.0.0:7710
       LIBRARY_SUWAYOMI_URL: http://suwayomi:4567
+      # La carpeta de entrada vista desde la máquina (solo para mostrarla en Admin → Catálogos).
+      LIBRARY_INBOX_LABEL: ${LIBRARY_INBOX_LABEL:-deploy/data/library/inbox}
     ports:
       - "127.0.0.1:7710:7710"
     volumes:

@@ -53,6 +53,8 @@ export default {
   "search.alsoAs": "Also searched as",
   "search.resultsFor": "Results for “{q}”",
   "search.onlyThis": "Search only this title",
+  "search.books": "Free books on {name} · {n}",
+  "search.inCatalogs": "Search “{q}” in free books",
   "suggest.searchAll": "Search “{q}” in every source",
   "suggest.aka": "Also: {titles}",
   "suggest.none": "No suggestions. Enter searches every source.",

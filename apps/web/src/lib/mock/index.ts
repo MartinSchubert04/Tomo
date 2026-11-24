@@ -6,6 +6,8 @@ import epubUrl from "./sample.epub?url";
 import pdfUrl from "./sample.pdf?url";
 import type {
   Book,
+  Catalog,
+  CatalogEntry,
   Chapter,
   Extension,
   HistoryEntry,
@@ -165,14 +167,60 @@ function detail(id: string): MangaDetail | null {
 }
 
 const now = Date.now();
+const B = { series: null, seriesIndex: null, language: "es", description: null, year: null, origin: null } as const;
 const books: Book[] = [
-  { id: "b1", kind: "book", title: "Don Quijote (muestra)", author: "Miguel de Cervantes", format: "epub", cover: cover("Don Quijote", 5), size: 31541, addedAt: now - 3 * 86400000, uploader: "admin", pages: null },
-  { id: "b2", kind: "book", title: "Apuntes de muestra", author: null, format: "pdf", cover: null, size: 8561, addedAt: now - 5 * 86400000, uploader: "martin", pages: null },
-  { id: "b3", kind: "book", title: "Kaiju en mi Escuela Vol. 1", author: "Hiro Sato", format: "cbz", cover: cover("Kaiju Vol. 1", 7), size: 48_200_000, addedAt: now - 9 * 86400000, uploader: "admin", pages: 24 },
-  { id: "b4", kind: "book", title: "El Arte de Leer Despacio", author: "Ana Ruiz", format: "mobi", cover: cover("El Arte de Leer", 2), size: 1_200_000, addedAt: now - 12 * 86400000, uploader: "admin", pages: null },
-  { id: "b5", kind: "book", title: "Cuentos de la Selva", author: "Horacio Quiroga", format: "epub", cover: cover("Cuentos de la Selva", 3), size: 640_000, addedAt: now - 20 * 86400000, uploader: "martin", pages: null },
-  { id: "b6", kind: "book", title: "Diario de Viaje", author: "Anónimo", format: "txt", cover: null, size: 12_000, addedAt: now - 30 * 86400000, uploader: "admin", pages: null },
+  { ...B, id: "b1", kind: "book", title: "Don Quijote (muestra)", author: "Miguel de Cervantes", format: "epub", cover: cover("Don Quijote", 5), size: 31541, addedAt: now - 3 * 86400000, uploader: "admin", pages: null, year: 1605, origin: "Elejandría", description: "Un hidalgo de la Mancha enloquece leyendo libros de caballerías y sale a buscar aventuras." },
+  { ...B, id: "b2", kind: "book", title: "Apuntes de muestra", author: null, format: "pdf", cover: null, size: 8561, addedAt: now - 5 * 86400000, uploader: "martin", pages: null },
+  { ...B, id: "b3", kind: "book", title: "Kaiju en mi Escuela Vol. 1", author: "Hiro Sato", format: "cbz", cover: cover("Kaiju Vol. 1", 7), size: 48_200_000, addedAt: now - 9 * 86400000, uploader: "admin", pages: 24 },
+  { ...B, id: "b4", kind: "book", title: "El Arte de Leer Despacio", author: "Ana Ruiz", format: "mobi", cover: cover("El Arte de Leer", 2), size: 1_200_000, addedAt: now - 12 * 86400000, uploader: "admin", pages: null },
+  { ...B, id: "b5", kind: "book", title: "Cuentos de la Selva", author: "Horacio Quiroga", format: "epub", cover: cover("Cuentos de la Selva", 3), size: 640_000, addedAt: now - 20 * 86400000, uploader: "martin", pages: null, origin: "inbox" },
+  { ...B, id: "b6", kind: "book", title: "Diario de Viaje", author: "Anónimo", format: "txt", cover: null, size: 12_000, addedAt: now - 30 * 86400000, uploader: "admin", pages: null },
+  { ...B, id: "b7", kind: "book", title: "El Ojo del Mundo", author: "Robert Jordan", format: "epub", cover: cover("El Ojo del Mundo", 8), size: 2_100_000, addedAt: now - 2 * 86400000, uploader: "admin", pages: null, series: "La rueda del tiempo", seriesIndex: 1, year: 1990 },
+  { ...B, id: "b8", kind: "book", title: "La Gran Cacería", author: "Robert Jordan", format: "epub", cover: cover("La Gran Cacería", 9), size: 2_300_000, addedAt: now - 2 * 86400000, uploader: "admin", pages: null, series: "La rueda del tiempo", seriesIndex: 2, year: 1990 },
+  { ...B, id: "b9", kind: "book", title: "El Dragón Renacido", author: "Robert Jordan", format: "epub", cover: cover("El Dragón Renacido", 10), size: 2_400_000, addedAt: now - 1 * 86400000, uploader: "admin", pages: null, series: "La rueda del tiempo", seriesIndex: 3, year: 1991 },
+  { ...B, id: "b10", kind: "book", title: "Trafalgar", author: "Benito Pérez Galdós", format: "epub", cover: cover("Trafalgar", 11), size: 410_000, addedAt: now - 7 * 86400000, uploader: "admin", pages: null, series: "Episodios nacionales", seriesIndex: 1, year: 1873, origin: "Internet Archive" },
+  { ...B, id: "b11", kind: "book", title: "The Time Machine", author: "H. G. Wells", format: "epub", cover: cover("The Time Machine", 4), size: 300_000, addedAt: now - 40 * 86400000, uploader: "admin", pages: null, language: "en", year: 1895 },
 ];
+
+const CATALOGS: Catalog[] = [
+  { id: "elejandria", name: "Elejandría", kind: "elejandria", enabled: true, preset: true, spanish: true },
+  { id: "textos", name: "textos.info", kind: "opds", enabled: true, preset: true, spanish: true },
+  { id: "archive", name: "Internet Archive", kind: "archive", enabled: true, preset: true, spanish: true },
+];
+const CLASSICS: [string, string, number][] = [
+  ["Orgullo y prejuicio", "Jane Austen", 1813],
+  ["La isla del tesoro", "Robert Louis Stevenson", 1883],
+  ["Marianela", "Benito Pérez Galdós", 1878],
+  ["La Celestina", "Fernando de Rojas", 1499],
+  ["El principito", "Antoine de Saint-Exupéry", 1943],
+  ["Cien sonetos", "Francisco de Quevedo", 1648],
+  ["La metamorfosis", "Franz Kafka", 1915],
+  ["Niebla", "Miguel de Unamuno", 1914],
+  ["Rimas y leyendas", "Gustavo Adolfo Bécquer", 1871],
+  ["Martín Fierro", "José Hernández", 1872],
+  ["Facundo", "Domingo F. Sarmiento", 1845],
+  ["Fortunata y Jacinta", "Benito Pérez Galdós", 1887],
+  ["Meditaciones", "Marco Aurelio", 180],
+  ["Veinte mil leguas de viaje submarino", "Julio Verne", 1870],
+  ["El conde de Montecristo", "Alejandro Dumas", 1844],
+  ["Crimen y castigo", "Fiódor Dostoyevski", 1866],
+  ["La Regenta", "Leopoldo Alas Clarín", 1884],
+  ["Platero y yo", "Juan Ramón Jiménez", 1914],
+];
+const catEntries = (cid: string, k: number): CatalogEntry[] =>
+  CLASSICS.map(([title, author, year], i) => ({
+    id: `${cid}-${i}`,
+    title,
+    author,
+    cover: (i + k) % 6 === 5 ? null : cover(title, i + k * 3),
+    language: "es",
+    year,
+    summary: i % 2 ? null : `${title} (${year}), de ${author}. Una edición digital gratuita de dominio público, lista para leer en el server.`,
+    formats: cid === "archive" && i % 4 === 1 ? ["pdf"] : ["epub", "pdf"],
+    imported: null,
+    url: "https://example.org/" + cid + "/" + i,
+  })).sort(() => 0.5 - ((k * 7) % 3) / 2);
+const imported = new Map<string, string>();
 
 const db = {
   users: [
@@ -402,6 +450,55 @@ async function handle(method: string, path: string, url: URL, body: unknown): Pr
   }
   if (path === "/history") return json(historyEntries());
   if (seg[0] === "history" && seg[1]) return db.last.delete(decodeURIComponent(seg[1])), empty();
+
+  if (path === "/catalogs") return json(CATALOGS);
+  if (path === "/admin/catalogs") return json(CATALOGS.map((c) => ({ ...c, url: `https://${c.id}.example.org/opds` })));
+  if (seg[0] === "admin" && seg[1] === "catalogs") return method === "POST" ? json({ id: "o9", name: "Mi Calibre", kind: "opds", url: String((body as { url: string }).url), enabled: true, preset: false, spanish: false }) : empty();
+  if (path === "/admin/inbox" || path === "/admin/inbox/scan")
+    return json({ path: "/data/inbox", hostPath: "/mnt/data/library/library/inbox", pending: ["La rueda del tiempo 4.epub"], failed: [{ name: "notas.docx", error: "Unsupported file type (use EPUB, PDF, CBZ, MOBI, AZW3, FB2 or TXT)" }] });
+  const mark = (l: CatalogEntry[]) => l.map((e) => ({ ...e, imported: imported.get(e.id) ?? null }));
+  if (path === "/catalogs/search") {
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(c) {
+        for (const [k, cat] of CATALOGS.entries()) {
+          await wait(250 + k * 300);
+          const entries = mark(catEntries(cat.id, k)).filter((e, i) => e.title.toLowerCase().includes(q) || e.author!.toLowerCase().includes(q) || (i + k) % 5 === 0).slice(0, 10);
+          c.enqueue(enc.encode(JSON.stringify({ catalog: cat, entries }) + "\n"));
+        }
+        c.close();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } });
+  }
+  if (seg[0] === "catalogs" && seg[1]) {
+    const cid = seg[1];
+    const k = CATALOGS.findIndex((c) => c.id === cid);
+    if (k < 0) return err(404, "not_found");
+    if (seg[2] === "browse") {
+      await wait(350);
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const pathP = url.searchParams.get("path");
+      let list = mark(catEntries(cid, k));
+      if (q) list = list.filter((e) => e.title.toLowerCase().includes(q) || e.author!.toLowerCase().includes(q));
+      const navigation = cid === "textos" && !pathP && !q ? [{ title: "Textos más populares", path: "pop" }, { title: "Novedades", path: "new" }, { title: "Autores", path: "aut" }] : [];
+      return json({ title: null, entries: pathP === "p2" ? list.slice(6) : list, navigation, next: !pathP && !q ? "p2" : null });
+    }
+    if (seg[2] === "entry") {
+      const e = mark(catEntries(cid, k)).find((x) => x.id === decodeURIComponent(seg[3]));
+      return e ? json({ ...e, summary: e.summary ?? `${e.title}: sinopsis completa traída de la ficha del libro.` }) : err(404, "not_found");
+    }
+    if (seg[2] === "import") {
+      await wait(900);
+      const id = (body as { entry: string }).entry;
+      const e = catEntries(cid, k).find((x) => x.id === id)!;
+      const b: Book = { ...B, id: `b${100 + books.length}`, kind: "book", title: e.title, author: e.author, format: "epub", cover: e.cover, size: 520_000, addedAt: Date.now(), uploader: "admin", pages: null, year: e.year, origin: CATALOGS[k].name, description: e.summary };
+      books.unshift(b);
+      imported.set(id, b.id);
+      return json(b, 201);
+    }
+  }
 
   if (path === "/books") return json(books);
   if (seg[0] === "books" && seg[1]) {

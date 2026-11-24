@@ -1,8 +1,10 @@
 <script lang="ts">
   // Admin: usuarios (crear, cambiar contraseña, hacer admin, borrar), fuentes (las extensiones de
-  // Suwayomi: filtro por idioma, busqueda, instalar / actualizar / desinstalar) y los repos de
-  // extensiones. La pestaña queda en la URL (#/admin?tab=sources).
+  // Suwayomi: filtro por idioma, busqueda, instalar / actualizar / desinstalar), los repos de
+  // extensiones y los catalogos de libros + la carpeta de entrada (components/AdminCatalogs).
+  // La pestaña queda en la URL (#/admin?tab=sources).
   import { Download, KeyRound, LoaderCircle, Plus, RefreshCw, Search, Shield, ShieldOff, Trash2, UserPlus, X } from "@lucide/svelte";
+  import AdminCatalogs from "../components/AdminCatalogs.svelte";
   import Drawer from "../components/Drawer.svelte";
   import Seg from "../components/Seg.svelte";
   import Switch from "../components/Switch.svelte";
@@ -15,7 +17,7 @@
   import { attempt, toast } from "../lib/toast.svelte";
   import type { Extension, User } from "../lib/types";
 
-  type Tab = "users" | "sources" | "repos";
+  type Tab = "users" | "sources" | "repos" | "catalogs";
   const tab = $derived((route.query.get("tab") as Tab) || "users");
 
   // ---------- usuarios ----------
@@ -155,6 +157,7 @@
         { value: "users" as Tab, label: t("admin.users") },
         { value: "sources" as Tab, label: t("admin.sources") },
         { value: "repos" as Tab, label: t("admin.repos") },
+        { value: "catalogs" as Tab, label: t("admin.catalogs") },
       ]}
       onchange={(v) => setQuery({ tab: v })}
     />
@@ -245,6 +248,8 @@
         <div class="more"><button class="btn" onclick={() => (limit += 120)}>{t("admin.showMore", { n: shownExts.length - limit })}</button></div>
       {/if}
     {/if}
+  {:else if tab === "catalogs"}
+    <AdminCatalogs />
   {:else}
     <div class="hint-top faint">{t("admin.reposHint")}</div>
     <div class="repos">

@@ -20,6 +20,21 @@ pub struct Config {
     pub update_every: Option<Duration>,
     /// GraphQL de AniList para las sugerencias (títulos en otros idiomas). Vacío = sin AniList.
     pub anilist_url: String,
+    /// Catálogos de libros de fábrica. Vacío = ese catálogo no se ofrece.
+    pub archive_url: String,
+    pub elejandria_url: String,
+    /// Raíz OPDS de textos.info (biblioteca digital abierta en español).
+    pub textos_url: String,
+    /// Raíz OPDS de Project Gutenberg.
+    pub gutenberg_url: String,
+    /// Open Library para completar datos de los libros. Vacío = no se usa.
+    pub openlibrary_url: String,
+    /// Cada cuánto revisar la carpeta de entrada (`<datos>/inbox`). `None` = nunca.
+    pub inbox_every: Option<Duration>,
+    /// Cuánto tiene que estar quieto un archivo de la carpeta de entrada antes de importarlo.
+    pub inbox_stable: Duration,
+    /// Dónde está la carpeta de entrada en la máquina (solo para mostrarlo en Admin).
+    pub inbox_label: Option<String>,
     /// Primer admin si la base está vacía.
     pub admin_user: Option<String>,
     pub admin_password: Option<String>,
@@ -41,6 +56,14 @@ impl Config {
             max_upload_bytes: 1024 * 1024 * 1024,
             update_every: Some(Duration::from_secs(6 * 3600)),
             anilist_url: DEFAULT_ANILIST_URL.into(),
+            archive_url: "https://archive.org".into(),
+            elejandria_url: "https://www.elejandria.com".into(),
+            textos_url: "https://www.textos.info/opds".into(),
+            gutenberg_url: "https://www.gutenberg.org/ebooks.opds/".into(),
+            openlibrary_url: "https://openlibrary.org".into(),
+            inbox_every: Some(Duration::from_secs(30)),
+            inbox_stable: Duration::from_secs(10),
+            inbox_label: None,
             admin_user: None,
             admin_password: None,
         }

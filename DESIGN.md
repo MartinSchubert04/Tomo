@@ -112,6 +112,31 @@ Exceptions as in Mythos: Athanor (PxPlus IBM VGA 8x16 at 16 px, titles in Jacqua
 - **Upload dropzone** (`Dropzone`): the whole Books view accepts dropped files (an accent dashed
   overlay appears: "Soltá para subir"); also a button. Each upload shows a card with a progress bar
   (XHR upload progress) that turns into the real cover when done.
+- **Books view** (`views/Books.svelte`): two tabs in a `Seg` ("Mis libros" / "Libros gratis", in
+  the URL as `?tab=explore`). *Mis libros*: format chips + filter on the left; language `Select`
+  (only when there's more than one), sort (Recientes / Título / Autor) and "Por saga / Todos" on
+  the right. "Por saga" shows one section per series ("La rueda del tiempo · 3 libros"), books in
+  order with a `#n` badge on the cover, then "Sueltos"; "Todos" is the plain grid with "Saga #n"
+  as the second line. Grouping and sort are remembered per device.
+- **Free books** (`components/CatalogBrowser.svelte`): a one-line note that only free and legal
+  libraries are used; catalog chips ("Todos" + each, Spanish ones marked `ES`); search box (waits
+  450 ms after typing, Enter is immediate) and "Solo en español" switch. "Todos" without a search:
+  one `Row` of popular books per catalog; searching: one row per catalog as it answers (NDJSON),
+  failing catalogs as red chips at the end. One catalog: its grid with infinite scroll and, for
+  OPDS, its sections as chips plus breadcrumbs to go back. Imported books show a `✓` badge.
+- **Catalog book drawer** (`components/CatalogEntryDrawer.svelte`): cover, title, author, chips
+  (catalog, language name via `Intl.DisplayNames`, year, formats), the primary action ("Agregar a
+  mis libros" → spinner "Bajando…" → "Leer" + "Ya está en tus libros" in `--ok`), "Ver en el sitio",
+  and the synopsis clamped to 8 lines ("Más"). The same drawer opens from the global Search view,
+  whose results end with one row per catalog ("Libros gratis en Elejandría · 4"). The typeahead
+  panel ends with "Buscar «…» en los libros gratis".
+- **Book editor** (Drawer): title, author, series + number, language + year, synopsis; the footer
+  line says where the book came from ("de Internet Archive", "de la carpeta de entrada",
+  "subido por martin").
+- **Admin → Catálogos** (`components/AdminCatalogs.svelte`): one card per catalog (name, chips
+  "De fábrica" / "Español" / kind, URL in mono) with a `Switch`; custom ones have a delete icon; a
+  URL field to add an OPDS catalog. Below, the inbox folder card: host path and container path in
+  `code`, "N archivos esperando" + "Revisar ahora", and failed files with their error.
 - **Extension row** (Admin → Fuentes): icon, name, lang, version, NSFW badge, Install / Update /
   Uninstall button with a spinner; language filter (Seg: Español / Todos / Instaladas) and search.
 - **Select, Switch, Seg, Confirm, Drawer, Section, PopMenu, toasts, tooltips**: Mythos'.
@@ -183,7 +208,7 @@ centered; narrow pages (Settings) center their own column. Nothing hugs one edge
 the other at 1920 or 2560.
 
 Hash routes: `#/`, `#/explore`, `#/explore/{sourceId}?type=&q=`, `#/search?q=`, `#/library`,
-`#/books`, `#/history`, `#/manga/{workId}`, `#/read/{workId}/{chapterId}?page=`,
+`#/books?tab=explore&catalog=&q=`, `#/history`, `#/manga/{workId}`, `#/read/{workId}/{chapterId}?page=`,
 `#/book/{workId}`, `#/settings`, `#/admin`. Each view is loaded only when needed.
 
 ## 5b. Motion

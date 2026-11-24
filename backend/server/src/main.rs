@@ -71,6 +71,23 @@ fn config_from_env() -> anyhow::Result<Config> {
     if let Ok(a) = std::env::var("LIBRARY_ANILIST_URL") {
         cfg.anilist_url = a.trim().to_string();
     }
+    // Catálogos de libros: cada uno se apaga con su variable vacía.
+    for (name, field) in [
+        ("LIBRARY_ARCHIVE_URL", &mut cfg.archive_url),
+        ("LIBRARY_ELEJANDRIA_URL", &mut cfg.elejandria_url),
+        ("LIBRARY_TEXTOS_URL", &mut cfg.textos_url),
+        ("LIBRARY_GUTENBERG_URL", &mut cfg.gutenberg_url),
+        ("LIBRARY_OPENLIBRARY_URL", &mut cfg.openlibrary_url),
+    ] {
+        if let Ok(v) = std::env::var(name) {
+            *field = v.trim().to_string();
+        }
+    }
+    if let Some(v) = var("LIBRARY_INBOX_SECONDS") {
+        let n: u64 = v.parse().with_context(|| format!("LIBRARY_INBOX_SECONDS inválido: {v:?} (segundos, 0 = nunca)"))?;
+        cfg.inbox_every = (n > 0).then(|| Duration::from_secs(n.max(5)));
+    }
+    cfg.inbox_label = var("LIBRARY_INBOX_LABEL");
     cfg.admin_user = var("LIBRARY_ADMIN_USER");
     cfg.admin_password = var("LIBRARY_ADMIN_PASSWORD");
     Ok(cfg)

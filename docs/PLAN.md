@@ -25,5 +25,8 @@
    readers), admin (users, extensions), themes, deploy on MRTN-SERVER.
 2. **v0.2** — library updates (new chapter badges), PWA offline shell, reader polish (double page,
    zoom), tracking of reading stats.
-3. Later — downloads for offline reading on the phone, FlareSolverr for Cloudflare sources,
+3. **v0.3** — books beyond uploads: free and legal catalogs (Elejandría, textos.info, Internet
+   Archive public domain, optional Gutenberg and any OPDS), inbox folder, series and Open Library
+   metadata.
+4. Later — downloads for offline reading on the phone, FlareSolverr for Cloudflare sources,
    OPDS feed for e-readers, desktop/Android shells like Mythos.

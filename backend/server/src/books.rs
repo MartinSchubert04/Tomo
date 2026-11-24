@@ -1,6 +1,8 @@
-//! Libros y cómics subidos (compartidos por todos los usuarios): subida en streaming a
+//! Libros y cómics (compartidos por todos los usuarios): subida en streaming a
 //! `data/books/<id>.<ext>` (nunca entero en memoria), datos del EPUB/CBZ (`bookmeta.rs`), portadas
 //! en `data/covers/`, el archivo con `Range` (para pdf.js y foliate-js) y las páginas de un CBZ.
+//! `import_file` es la entrada común: la usan la subida, los catálogos (`catalogs.rs`) y la carpeta
+//! de entrada (`inbox.rs`); después de importar, Open Library completa lo que falte.
 use std::{
     collections::HashMap,
     path::{Path as FsPath, PathBuf},
@@ -24,7 +26,9 @@ use tower_http::services::ServeFile;
 use crate::{
     auth::{new_token, AuthUser},
     bookmeta::{self, content_type, format_for, magic_ok, title_from_name},
+    catalogs::Hint,
     db::now_ms,
+    openlibrary,
     error::{ApiError, ApiResult, Json, Path},
     library::book_card,
     state::AppState,
@@ -50,15 +54,23 @@ pub fn routes() -> Router<AppState> {
 #[serde(rename_all = "camelCase")]
 pub struct Book {
     #[serde(flatten)]
-    card: WorkCard,
+    pub card: WorkCard,
     author: Option<String>,
     size: i64,
     added_at: i64,
     uploader: String,
     pages: Option<i64>,
+    series: Option<String>,
+    series_index: Option<f64>,
+    language: Option<String>,
+    description: Option<String>,
+    year: Option<i64>,
+    /// De dónde vino: nombre del catálogo, "inbox" o `null` (subido).
+    origin: Option<String>,
 }
 
-const BOOK_COLS: &str = "id, title, format, cover_ext IS NOT NULL, author, size, added_at, uploader, pages";
+const BOOK_COLS: &str =
+    "id, title, format, cover_ext IS NOT NULL, author, size, added_at, uploader, pages, series, series_index, language, description, year, origin";
 
 fn book_from_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
     Ok(Book {
@@ -68,10 +80,16 @@ fn book_from_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
         added_at: r.get(6)?,
         uploader: r.get(7)?,
         pages: r.get(8)?,
+        series: r.get(9)?,
+        series_index: r.get(10)?,
+        language: r.get(11)?,
+        description: r.get(12)?,
+        year: r.get(13)?,
+        origin: r.get(14)?,
     })
 }
 
-fn books_dir(s: &AppState) -> PathBuf {
+pub fn books_dir(s: &AppState) -> PathBuf {
     s.cfg.data_dir.join("books")
 }
 
@@ -105,7 +123,7 @@ async fn row(s: &AppState, id: i64) -> ApiResult<Row> {
         .await
 }
 
-async fn get_book(s: &AppState, id: i64) -> ApiResult<Book> {
+pub async fn get_book(s: &AppState, id: i64) -> ApiResult<Book> {
     s.db
         .call(move |c| {
             c.query_row(&format!("SELECT {BOOK_COLS} FROM books WHERE id = ?1"), [id], book_from_row)
@@ -132,7 +150,7 @@ async fn one(State(s): State<AppState>, _u: AuthUser, Path(id): Path<String>) ->
 }
 
 /// Borra el temporal si la subida no termina bien (también si se corta la conexión).
-struct TmpGuard(Option<PathBuf>);
+pub struct TmpGuard(pub Option<PathBuf>);
 
 impl Drop for TmpGuard {
     fn drop(&mut self) {
@@ -142,10 +160,110 @@ impl Drop for TmpGuard {
     }
 }
 
-async fn upload(State(s): State<AppState>, u: AuthUser, mut mp: Multipart) -> ApiResult<Json<Vec<Book>>> {
-    let (books, covers) = (books_dir(&s), covers_dir(&s));
-    tokio::fs::create_dir_all(&books).await?;
+/// De dónde viene un libro que se importa.
+pub struct ImportFrom {
+    pub origin: Option<String>,
+    pub source_url: Option<String>,
+    pub uploader_id: Option<i64>,
+    pub uploader: String,
+    /// Datos que ya se saben (de un catálogo): se usan si el archivo no los trae.
+    pub hint: Hint,
+    /// Portada para bajar si el archivo no trae una.
+    pub cover_url: Option<String>,
+}
+
+/// Registra un libro que ya está entero en `tmp` (dentro de `books/`): lee sus datos, lo guarda
+/// como `books/<id>.<ext>`, guarda la portada y lanza el completado con Open Library. Si falla,
+/// `tmp` queda donde estaba (lo borra o lo mueve quien llamó).
+pub async fn import_file(s: &AppState, tmp: &FsPath, name: &str, format: &'static str, ext: &'static str, size: u64, from: ImportFrom) -> ApiResult<Book> {
+    let books = books_dir(s);
+    let covers = covers_dir(s);
     tokio::fs::create_dir_all(&covers).await?;
+    let meta = {
+        let p = tmp.to_path_buf();
+        tokio::task::spawn_blocking(move || bookmeta::read_meta(&p, format)).await.map_err(ApiError::internal)?
+    };
+    let h = from.hint;
+    let clean = |v: Option<String>, max: usize| v.map(|t| t.trim().chars().take(max).collect::<String>()).filter(|t| !t.is_empty());
+    // Un título de archivo que es solo el nombre ("libro", "Unknown") no le gana al del catálogo.
+    let generic = |t: &str| matches!(t.trim().to_lowercase().as_str(), "" | "unknown" | "untitled" | "sin título" | "libro" | "book");
+    let title = clean(meta.title.clone().filter(|t| !generic(t)), 300)
+        .or_else(|| clean(h.title.clone(), 300))
+        .unwrap_or_else(|| title_from_name(name));
+    let unknown_author = |t: &str| matches!(t.trim().to_lowercase().as_str(), "anonymous" | "anónimo" | "anonimo" | "unknown" | "desconocido" | "various");
+    let author = clean(meta.author.clone().filter(|a| !unknown_author(a)), 300)
+        .or_else(|| clean(h.author.clone(), 300))
+        .or_else(|| clean(meta.author.clone(), 300));
+    let language = meta.language.clone().or_else(|| h.language.as_deref().and_then(bookmeta::normalize_lang));
+    // La sinopsis más completa: la del EPUB suele ser una línea ("Book from Project Gutenberg").
+    let hint_desc = h.summary.as_deref().map(|t| bookmeta::plain_text(t, 4000)).filter(|t| !t.is_empty());
+    let description = match (meta.description.clone(), hint_desc) {
+        (Some(a), Some(b)) => Some(if b.chars().count() > a.chars().count() { b } else { a }),
+        (a, b) => a.or(b),
+    };
+    // El año del catálogo antes que el del OPF (que muchas veces es el de la edición digital).
+    let year = h.year.or(meta.year);
+    let (series, series_index, pages) = (meta.series.clone(), meta.series_index, meta.pages);
+    let (uid, uname, origin, source_url) = (from.uploader_id, from.uploader, from.origin, from.source_url);
+    let id: i64 = s
+        .db
+        .call(move |c| {
+            Ok(c.query_row(
+                "INSERT INTO books (title, author, format, ext, size, added_at, uploader_id, uploader, pages,
+                                    series, series_index, language, description, year, source_url, origin)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) RETURNING id",
+                params![title, author, format, ext, size as i64, now_ms(), uid, uname, pages, series, series_index, language, description, year, source_url, origin],
+                |r| r.get(0),
+            )?)
+        })
+        .await?;
+    let dest = books.join(format!("{id}.{ext}"));
+    if let Err(e) = tokio::fs::rename(tmp, &dest).await {
+        s.db.call(move |c| Ok(c.execute("DELETE FROM books WHERE id = ?1", [id])?)).await?;
+        return Err(e.into());
+    }
+    let mut has_cover = false;
+    if let Some((bytes, cext)) = meta.cover {
+        if tokio::fs::write(covers.join(format!("b{id}.{cext}")), bytes).await.is_ok() {
+            s.db.call(move |c| Ok(c.execute("UPDATE books SET cover_ext = ?2 WHERE id = ?1", params![id, cext])?)).await?;
+            has_cover = true;
+        }
+    }
+    if !has_cover {
+        if let Some(u) = from.cover_url {
+            let _ = save_cover_from_url(s, id, &u).await;
+        }
+    }
+    openlibrary::spawn_enrich(s, id);
+    get_book(s, id).await
+}
+
+/// Baja una portada (≤ 2 MB, solo imágenes) y la guarda como la del libro `id`.
+pub async fn save_cover_from_url(s: &AppState, id: i64, url: &str) -> ApiResult<()> {
+    let res = s.catalogs.http.get(url).timeout(std::time::Duration::from_secs(20)).send().await.map_err(|e| ApiError::source(e.to_string()))?;
+    if !res.status().is_success() {
+        return Err(ApiError::not_found("No cover"));
+    }
+    let ct = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").trim().to_string();
+    let ext = bookmeta::ext_for_mime(&ct).ok_or_else(|| ApiError::not_found("No cover"))?;
+    if res.content_length().is_some_and(|n| n as usize > MAX_COVER) {
+        return Err(ApiError::too_large("Cover too big"));
+    }
+    let bytes = res.bytes().await.map_err(|e| ApiError::source(e.to_string()))?;
+    // Open Library contesta un GIF de 1 px cuando no tiene portada.
+    if bytes.len() < 1024 || bytes.len() > MAX_COVER {
+        return Err(ApiError::not_found("No cover"));
+    }
+    let dir = covers_dir(s);
+    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::write(dir.join(format!("b{id}.{ext}")), &bytes).await?;
+    s.db.call(move |c| Ok(c.execute("UPDATE books SET cover_ext = ?2 WHERE id = ?1 AND cover_ext IS NULL", params![id, ext])?)).await?;
+    Ok(())
+}
+
+async fn upload(State(s): State<AppState>, u: AuthUser, mut mp: Multipart) -> ApiResult<Json<Vec<Book>>> {
+    let books = books_dir(&s);
+    tokio::fs::create_dir_all(&books).await?;
     let max = s.cfg.max_upload_bytes;
     let mut out = Vec::new();
     while let Some(mut field) = mp.next_field().await? {
@@ -177,38 +295,11 @@ async fn upload(State(s): State<AppState>, u: AuthUser, mut mp: Multipart) -> Ap
         if !magic_ok(format, &head) {
             return Err(ApiError::bad_request(format!("{name} is not a valid {} file", format.to_uppercase())));
         }
-        let meta = {
-            let p = tmp.clone();
-            tokio::task::spawn_blocking(move || bookmeta::read_meta(&p, format)).await.map_err(ApiError::internal)?
-        };
-        let title = meta.title.clone().unwrap_or_else(|| title_from_name(&name));
-        let (uid, uname) = (u.user.id, u.user.name.clone());
-        let author = meta.author.clone();
-        let pages = meta.pages;
-        let id: i64 = s
-            .db
-            .call(move |c| {
-                Ok(c.query_row(
-                    "INSERT INTO books (title, author, format, ext, size, added_at, uploader_id, uploader, pages)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) RETURNING id",
-                    params![title, author, format, ext, size as i64, now_ms(), uid, uname, pages],
-                    |r| r.get(0),
-                )?)
-            })
-            .await?;
-        let dest = books.join(format!("{id}.{ext}"));
-        if let Err(e) = tokio::fs::rename(&tmp, &dest).await {
-            s.db.call(move |c| Ok(c.execute("DELETE FROM books WHERE id = ?1", [id])?)).await?;
-            return Err(e.into());
-        }
+        let from = ImportFrom { origin: None, source_url: None, uploader_id: Some(u.user.id), uploader: u.user.name.clone(), hint: Hint::default(), cover_url: None };
+        let book = import_file(&s, &tmp, &name, format, ext, size, from).await?;
         guard.0 = None;
-        if let Some((bytes, cext)) = meta.cover {
-            if tokio::fs::write(covers.join(format!("b{id}.{cext}")), bytes).await.is_ok() {
-                s.db.call(move |c| Ok(c.execute("UPDATE books SET cover_ext = ?2 WHERE id = ?1", params![id, cext])?)).await?;
-            }
-        }
-        tracing::info!(user = %u.user.name, %id, %format, size, "libro subido");
-        out.push(get_book(&s, id).await?);
+        tracing::info!(user = %u.user.name, id = %book.card.id, %format, size, "libro subido");
+        out.push(book);
     }
     if out.is_empty() {
         return Err(ApiError::bad_request("No file was sent (field name: file)"));
@@ -225,19 +316,32 @@ fn can_edit(u: &AuthUser, uploader_id: Option<i64>) -> ApiResult<()> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EditBody {
     title: Option<String>,
     author: Option<String>,
+    /// `""` borra la saga (y el número).
+    series: Option<String>,
+    series_index: Option<f64>,
+    language: Option<String>,
+    description: Option<String>,
+    year: Option<i64>,
 }
 
 async fn edit(State(s): State<AppState>, u: AuthUser, Path(id): Path<String>, Json(b): Json<EditBody>) -> ApiResult<Json<Book>> {
     let id = parse_id(&id)?;
     can_edit(&u, row(&s, id).await?.uploader_id)?;
-    let clean = |v: Option<String>| v.map(|t| t.trim().chars().take(300).collect::<String>());
-    let (title, author) = (clean(b.title), clean(b.author));
+    let clean = |v: Option<String>, max: usize| v.map(|t| t.trim().chars().take(max).collect::<String>());
+    let (title, author, series) = (clean(b.title, 300), clean(b.author, 300), clean(b.series, 300));
+    let description = clean(b.description, 4000);
+    let language = b.language.map(|l| bookmeta::normalize_lang(&l).unwrap_or_default());
     if title.as_deref() == Some("") {
         return Err(ApiError::bad_request("The title can't be empty"));
     }
+    if b.series_index.is_some_and(|n| !n.is_finite() || !(0.0..=10_000.0).contains(&n)) || b.year.is_some_and(|y| !(0..=2100).contains(&y)) {
+        return Err(ApiError::bad_request("Invalid number"));
+    }
+    let (series_index, year) = (b.series_index, b.year);
     s.db
         .call(move |c| {
             if let Some(t) = title {
@@ -245,6 +349,21 @@ async fn edit(State(s): State<AppState>, u: AuthUser, Path(id): Path<String>, Js
             }
             if let Some(a) = author {
                 c.execute("UPDATE books SET author = NULLIF(?2, '') WHERE id = ?1", params![id, a])?;
+            }
+            if let Some(sr) = series {
+                c.execute("UPDATE books SET series = NULLIF(?2, ''), series_index = CASE WHEN ?2 = '' THEN NULL ELSE series_index END WHERE id = ?1", params![id, sr])?;
+            }
+            if let Some(n) = series_index {
+                c.execute("UPDATE books SET series_index = ?2 WHERE id = ?1", params![id, n])?;
+            }
+            if let Some(l) = language {
+                c.execute("UPDATE books SET language = NULLIF(?2, '') WHERE id = ?1", params![id, l])?;
+            }
+            if let Some(d) = description {
+                c.execute("UPDATE books SET description = NULLIF(?2, '') WHERE id = ?1", params![id, d])?;
+            }
+            if let Some(y) = year {
+                c.execute("UPDATE books SET year = NULLIF(?2, 0) WHERE id = ?1", params![id, y])?;
             }
             Ok(())
         })

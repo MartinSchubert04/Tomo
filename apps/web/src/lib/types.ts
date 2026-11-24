@@ -46,7 +46,38 @@ export type Book = WorkCard & {
   addedAt: number;
   uploader: string;
   pages: number | null;
+  series: string | null;
+  seriesIndex: number | null;
+  /** "es", "en"... */
+  language: string | null;
+  description: string | null;
+  year: number | null;
+  /** De donde vino: nombre del catalogo, "inbox" o null (subido). */
+  origin: string | null;
 };
+
+export type CatalogKind = "opds" | "archive" | "elejandria";
+export type Catalog = { id: string; name: string; kind: CatalogKind; url?: string; enabled: boolean; preset: boolean; spanish: boolean };
+
+export type CatalogEntry = {
+  /** Opaco: se devuelve tal cual para importar o pedir el detalle. */
+  id: string;
+  title: string;
+  author: string | null;
+  cover: string | null;
+  language: string | null;
+  year: number | null;
+  summary: string | null;
+  formats: string[];
+  /** Id del libro ("b12") si ya se importo. */
+  imported: string | null;
+  url: string | null;
+};
+export type CatalogNav = { title: string; path: string };
+export type CatalogPage = { title: string | null; entries: CatalogEntry[]; navigation: CatalogNav[]; next: string | null };
+export type CatalogGroup = { catalog: Catalog; entries: CatalogEntry[]; error?: string };
+
+export type InboxStatus = { path: string; hostPath: string | null; pending: string[]; failed: { name: string; error: string }[] };
 
 export type LibraryStatus = "reading" | "planned" | "completed" | "onhold" | "dropped";
 export const LIBRARY_STATUSES: LibraryStatus[] = ["reading", "planned", "completed", "onhold", "dropped"];

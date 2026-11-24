@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 
-use crate::{anilist::AniList, auth::Auth, config::Config, db::Db, suwayomi::Suwayomi};
+use crate::{anilist::AniList, auth::Auth, catalogs::Catalogs, config::Config, db::Db, inbox::Inbox, openlibrary::OpenLibrary, suwayomi::Suwayomi};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,6 +14,10 @@ pub struct AppState {
     pub anilist: AniList,
     /// Cliente para las portadas de AniList (`/api/img/al/...`), con tiempo máximo.
     pub anilist_img: reqwest::Client,
+    /// Catálogos de libros: cliente HTTP, firma de URLs y cachés.
+    pub catalogs: Catalogs,
+    pub openlib: OpenLibrary,
+    pub inbox: Inbox,
 }
 
 impl FromRef<AppState> for Auth {

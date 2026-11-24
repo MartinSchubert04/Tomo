@@ -40,6 +40,13 @@ async fn setup_with(suwayomi: Option<String>, anilist: Option<String>) -> T {
     // Sin Suwayomi: un puerto donde no escucha nadie.
     cfg.suwayomi_url = suwayomi.unwrap_or_else(|| "http://127.0.0.1:9".into());
     cfg.anilist_url = anilist.unwrap_or_default();
+    // Sin catálogos de libros, Open Library ni carpeta de entrada (eso se prueba en catalogs.rs).
+    cfg.archive_url.clear();
+    cfg.elejandria_url.clear();
+    cfg.textos_url.clear();
+    cfg.gutenberg_url.clear();
+    cfg.openlibrary_url.clear();
+    cfg.inbox_every = None;
     let db = Db::open_in_memory().unwrap();
     db.call(|c| {
         create_user(c, "admin", "secreto1", true)?;

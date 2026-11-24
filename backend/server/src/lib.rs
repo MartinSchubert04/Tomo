@@ -5,14 +5,20 @@
 //! Rutas: `/api/*` (ver `docs/API.md`) y, si hay `web_dir`, la UI compilada en `/`.
 pub mod admin;
 pub mod anilist;
+pub mod archive;
 pub mod auth;
 pub mod bookmeta;
 pub mod books;
+pub mod catalogs;
 pub mod config;
 pub mod db;
+pub mod elejandria;
 pub mod error;
+pub mod inbox;
 pub mod library;
 pub mod manga;
+pub mod openlibrary;
+pub mod opds;
 pub mod state;
 pub mod suggest;
 pub mod suwayomi;
@@ -94,6 +100,9 @@ pub fn build_state(cfg: Config, db: Db) -> anyhow::Result<AppState> {
         suwa: suwayomi::Suwayomi::new(&cfg.suwayomi_url)?,
         anilist: anilist::AniList::new(&cfg.anilist_url)?,
         anilist_img: reqwest::Client::builder().timeout(Duration::from_secs(15)).build()?,
+        catalogs: catalogs::Catalogs::new()?,
+        openlib: openlibrary::OpenLibrary::new(&cfg.openlibrary_url),
+        inbox: inbox::Inbox::default(),
         db,
         cfg: Arc::new(cfg),
     })
@@ -108,11 +117,15 @@ pub async fn run(cfg: Config) -> anyhow::Result<Handle> {
     if let Ok(rd) = std::fs::read_dir(cfg.data_dir.join("books")) {
         for e in rd.flatten() {
             if e.file_name().to_string_lossy().ends_with(".part") {
+                // Subidas, importaciones de catálogos o de la carpeta de entrada a medio hacer.
                 let _ = std::fs::remove_file(e.path());
             }
         }
     }
     let state = build_state(cfg.clone(), db.clone())?;
+    if let Err(e) = catalogs::ensure_presets(&state).await {
+        tracing::warn!("no se pudieron preparar los catálogos de libros: {}", e.message);
+    }
 
     let mut background = vec![tokio::spawn(cleanup_sessions(db))];
     {
@@ -121,6 +134,9 @@ pub async fn run(cfg: Config) -> anyhow::Result<Handle> {
     }
     if let Some(every) = cfg.update_every {
         background.push(tokio::spawn(updater::run(state.clone(), every)));
+    }
+    if let Some(every) = cfg.inbox_every {
+        background.push(tokio::spawn(inbox::run(state.clone(), every)));
     }
 
     let listener = tokio::net::TcpListener::bind(cfg.bind).await.with_context(|| format!("no se pudo escuchar en {}", cfg.bind))?;
@@ -170,6 +186,8 @@ pub fn app(state: AppState) -> Router {
         .merge(suggest::routes())
         .merge(library::routes())
         .merge(books::routes())
+        .merge(catalogs::routes())
+        .merge(inbox::routes())
         // Ningún cuerpo JSON necesita más (las preferencias tienen su propio tope de 64 KB). La
         // subida de libros y la portada ponen el suyo.
         .layer(DefaultBodyLimit::max(256 * 1024))

@@ -5,6 +5,11 @@ import { has, t } from "./i18n.svelte";
 import { markDown, markUp } from "./net.svelte";
 import type {
   Book,
+  Catalog,
+  CatalogEntry,
+  CatalogGroup,
+  CatalogPage,
+  InboxStatus,
   BrowsePage,
   BrowseType,
   Extension,
@@ -136,7 +141,10 @@ export const api = {
   // libros
   books: () => req<Book[]>("GET", "/books"),
   book: (id: string) => req<Book>("GET", `/books/${enc(id)}`),
-  editBook: (id: string, p: { title?: string; author?: string }) => req<Book>("PATCH", `/books/${enc(id)}`, p),
+  editBook: (
+    id: string,
+    p: { title?: string; author?: string; series?: string; seriesIndex?: number; language?: string; description?: string; year?: number },
+  ) => req<Book>("PATCH", `/books/${enc(id)}`, p),
   deleteBook: (id: string) => req<void>("DELETE", `/books/${enc(id)}`),
   bookPages: (id: string) => req<{ pages: string[] }>("GET", `/books/${enc(id)}/pages`),
   bookFileUrl: (id: string) => `/api/books/${enc(id)}/file`,
@@ -145,6 +153,23 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, "internal", t("common.errorStatus", { status: res.status }));
   },
   setBookPages: (id: string, pages: number) => req<void>("PUT", `/books/${enc(id)}/pages`, { pages }),
+
+  // catalogos de libros
+  catalogs: () => req<Catalog[]>("GET", "/catalogs"),
+  catalogBrowse: (id: string, o: { q?: string; path?: string | null; all?: boolean } = {}, signal?: AbortSignal) =>
+    req<CatalogPage>("GET", `/catalogs/${enc(id)}/browse` + qs({ q: o.q, path: o.path, lang: o.all ? "all" : undefined }), undefined, { signal }),
+  catalogEntry: (id: string, entry: string) => req<CatalogEntry>("GET", `/catalogs/${enc(id)}/entry/${enc(entry)}`),
+  catalogImport: (id: string, e: CatalogEntry) =>
+    req<Book>("POST", `/catalogs/${enc(id)}/import`, {
+      entry: e.id,
+      hint: { title: e.title, author: e.author, language: e.language, summary: e.summary, year: e.year },
+    }),
+  adminCatalogs: () => req<Catalog[]>("GET", "/admin/catalogs"),
+  addCatalog: (url: string, name?: string) => req<Catalog>("POST", "/admin/catalogs", { url, name }),
+  editCatalog: (id: string, p: { enabled?: boolean; name?: string }) => req<void>("PATCH", `/admin/catalogs/${enc(id)}`, p),
+  removeCatalog: (id: string) => req<void>("DELETE", `/admin/catalogs/${enc(id)}`),
+  inbox: () => req<InboxStatus>("GET", "/admin/inbox"),
+  scanInbox: () => req<InboxStatus>("POST", "/admin/inbox/scan"),
 };
 
 /** Sube archivos con progreso (fetch todavia no informa el progreso de subida). */
@@ -212,4 +237,36 @@ export async function searchAll(
     }
   }
   emit(buf);
+}
+
+/** Lee un NDJSON linea por linea (busquedas que van llegando). */
+async function readLines(res: Response, emit: (line: string) => void) {
+  if (!res.body) {
+    (await res.text()).split("\n").forEach(emit);
+    return;
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let i: number;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      emit(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+    }
+  }
+  emit(buf);
+}
+
+/** Busqueda en todos los catalogos de libros: una linea por catalogo apenas contesta. */
+export async function searchCatalogs(q: string, onGroup: (g: CatalogGroup) => void, signal: AbortSignal, o: { all?: boolean } = {}): Promise<void> {
+  const p = new URLSearchParams({ q });
+  if (o.all) p.set("lang", "all");
+  const res = await req<Response>("GET", "/catalogs/search?" + p.toString(), undefined, { signal, raw: true });
+  await readLines(res, (line) => {
+    const s = line.trim();
+    if (s) onGroup(JSON.parse(s) as CatalogGroup);
+  });
 }

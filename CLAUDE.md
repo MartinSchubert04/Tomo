@@ -107,6 +107,13 @@ bump the version, commit, tag, and push `main` and the tag. Then deploy it on th
   - In the UI: lazy views, `loading="lazy"` images with reserved `aspect-ratio`, virtualize or
     window long lists (chapter lists can have 1500 entries), preload only the next 3 pages in the
     reader, animations only on `transform` and `opacity`.
+- **Books only from free and legal sources.** Book catalogs (`catalogs.rs` and its adapters) are
+  public domain or openly licensed libraries, or OPDS catalogs an admin adds on purpose. Never
+  shadow libraries (LibGen, Anna's Archive, Z-Library, ePubLibre, Lectulandia…): not as presets,
+  not as code paths, not in docs. Internet Archive only with its public-domain marks
+  (`archive.rs`). Respect each site's `robots.txt` (Elejandría: no `/buscar`).
+- **Dev servers bind to 127.0.0.1** (`vite --host 127.0.0.1`, `LIBRARY_BIND=127.0.0.1:…`) and are
+  stopped when the task is done; never leave one on `0.0.0.0` (it's open to the whole LAN).
 - **Suwayomi is an implementation detail.** The UI never talks to Suwayomi and never sees its ids
   except inside work ids (`s123`). Everything goes through `docs/API.md`. If Suwayomi is down, the
   books side keeps working and manga views show "The manga server isn't responding".
