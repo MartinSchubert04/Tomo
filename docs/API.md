@@ -100,7 +100,7 @@ type Progress = {
 | POST | `/api/admin/users` | `{ name, password, admin }` | `User`; 409 if the name exists |
 | PATCH | `/api/admin/users/{id}` | `{ password?, admin? }` | 204 (can't remove the last admin: 409) |
 | DELETE | `/api/admin/users/{id}` | | 204 (not yourself: 409) |
-| GET | `/api/admin/extensions?lang=es&q=&installed=1` | | `Extension[]` sorted installed first, then by name |
+| GET | `/api/admin/extensions?lang=es&q=&installed=1` | | `Extension[]` sorted installed first, then by name. `lang` takes a comma list (`es,all`); `es` also matches `es-419` |
 | POST | `/api/admin/extensions/refresh` | | `Extension[]` (re-reads the repo index) |
 | POST | `/api/admin/extensions/{pkg}` | `{ action: "install" \| "uninstall" \| "update" }` | `Extension` |
 | GET | `/api/admin/repos` | | `string[]` (extension repo index URLs) |
@@ -181,7 +181,7 @@ manga in anyone's library (3 at a time). `unread` and `latestChapterAt` come fro
 | GET | `/api/books` | | `Book[]`, newest first |
 | POST | `/api/books` | `multipart/form-data`, one or more `file` fields (≤ 1 GB each) | `Book[]`. Format by extension (and magic bytes for zip/pdf). `.zip` and `.cbz` = `cbz`. EPUB: title, author and cover from the OPF. CBZ: cover = first image (natural sort). Others: title = file name |
 | GET | `/api/books/{id}` | | `Book` |
-| PATCH | `/api/books/{id}` | `{ title?, author? }` | `Book` |
+| PATCH | `/api/books/{id}` | `{ title?, author? }` (`author: ""` clears it) | `Book` (uploader or admin; 403 otherwise) |
 | DELETE | `/api/books/{id}` | | 204 (uploader or admin) |
 | GET | `/api/books/{id}/file` | | the file, with `Range` support and its `Content-Type` |
 | GET | `/api/books/{id}/cover` | | image (404 if none). `Cache-Control: private, max-age=86400` |

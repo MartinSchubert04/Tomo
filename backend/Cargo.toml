@@ -1,0 +1,13 @@
+# Workspace del backend: el binario `library` (server).
+[workspace]
+resolver = "2"
+members = ["server"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 16
+strip = true
+
+[profile.dev.package."*"]
+# Las dependencias optimizadas también en debug: argon2 y zip son lentísimos sin optimizar.
+opt-level = 2
