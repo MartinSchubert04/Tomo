@@ -77,7 +77,7 @@ warnings, and the change tried in the browser (desktop width and phone width, 39
 
 ## Versions: commit, tag and push
 
-Repo: https://github.com/MartinSchubert04/Library (public: no secrets; `.env` and `data/` stay out).
+Repo: https://github.com/MartinSchubert04/Tomo (renamed from `Library` on Nov 24, 2026; the local and server folders are still `Library`; public: no secrets; `.env` and `data/` stay out).
 
 Every finished fix or feature (tests and check green) is published without waiting to be asked:
 bump the version, commit, tag, and push `main` and the tag. Then deploy it on the server

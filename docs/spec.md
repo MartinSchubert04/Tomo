@@ -9,7 +9,7 @@ What the user asked for (November 24, 2026), in their words translated:
 - "As comfortable to use as possible." Look at Google and other repos for references.
 - Style / theme: modern and comfortable, with animations, "nice". Based on the user's own repos
   (Ethereon; Mythos already ported Ethereon's design to a web app).
-- Repo in `ComputerScience/Projects/`, pushed to https://github.com/MartinSchubert04/Library.
+- Repo in `ComputerScience/Projects/`, pushed to https://github.com/MartinSchubert04/Library (renamed to `Tomo` the same day).
 - A provisional name that can be changed easily across the whole app.
 - Take all the good things from Ethereon's CLAUDE.md.
 - Any stack, but always as performant as possible.

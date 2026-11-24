@@ -20,7 +20,7 @@ the rest of the server.
 
 ```bash
 mkdir -p ~/Projects && cd ~/Projects
-git clone https://github.com/MartinSchubert04/Library.git
+git clone https://github.com/MartinSchubert04/Tomo.git Library
 LIBRARY_ADMIN_USER=martin ./Library/deploy/deploy.sh   # the name is optional (default "admin")
 ```
 
